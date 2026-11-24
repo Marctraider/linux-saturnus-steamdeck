@@ -1,0 +1,60 @@
+From: linux-charcoal-conservative
+Subject: [PATCH] clang: add optional Polly optimization support
+
+Port the Polly Kconfig and Kbuild integration used by linux-charcoal.
+This patch is limited to Polly; it does not change kernel configuration
+or any driver selection.
+
+diff --git a/init/Kconfig b/init/Kconfig
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -318,11 +318,23 @@
+ config BUILD_SALT
+ 	string "Build ID Salt"
+ 	default ""
+ 	help
+ 	  The build ID is used to link binaries and their debug info. Setting
+ 	  this option will use the value in the calculation of the build id.
+ 	  This is mostly useful for distributions which want to ensure the
+ 	  build is unique between builds. It's safe to leave the default.
+ 
++config POLLY_CLANG
++	bool "Use Clang Polly optimizations"
++	depends on CC_IS_CLANG && $(cc-option,-mllvm -polly -fplugin=LLVMPolly.so)
++	depends on !COMPILE_TEST
++	help
++	  This option enables Clang's polyhedral loop optimizer known as
++	  Polly. Polly can optimize loops for improved memory access and
++	  cache locality. This requires a Clang toolchain built with Polly
++	  support and the LLVMPolly.so plugin.
++
++	    https://polly.llvm.org
++
+ config HAVE_KERNEL_GZIP
+ 	bool
+
+diff --git a/Makefile b/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -605,8 +605,21 @@
+ KBUILD_CFLAGS :=
+ KBUILD_CFLAGS += -fshort-wchar
+ KBUILD_CFLAGS += -funsigned-char
+ KBUILD_CFLAGS += -fno-common
+ KBUILD_CFLAGS += -fno-PIE
+ KBUILD_CFLAGS += -fno-strict-aliasing
+ 
++ifdef CONFIG_POLLY_CLANG
++KBUILD_CFLAGS += -fplugin=LLVMPolly.so \
++		 -mllvm -polly \
++		 -mllvm -polly-ast-use-context \
++		 -mllvm -polly-invariant-load-hoisting \
++		 -mllvm -polly-loopfusion-greedy \
++		 -mllvm -polly-run-inliner \
++		 -mllvm -polly-vectorizer=stripmine
++ifdef CONFIG_LD_DEAD_CODE_DATA_ELIMINATION
++KBUILD_CFLAGS += -mllvm -polly-run-dce
++endif
++endif
++
+ KBUILD_CPPFLAGS := -D__KERNEL__
