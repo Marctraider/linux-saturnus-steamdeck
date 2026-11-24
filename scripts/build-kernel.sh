@@ -59,7 +59,7 @@ else
   echo "readelf/llvm-readelf is required to verify kernel BTF." >&2
   exit 1
 fi
-"$READELF" -S "$OUT/vmlinux" | grep -Eq '[[:space:]]\\.BTF([[:space:]]|$)' || {
+"$READELF" -S "$OUT/vmlinux" | grep -Eq '[[:space:]]\.BTF([[:space:]]|$)' || {
   echo "Linked vmlinux has no .BTF section; refusing to package a kernel unusable by LAVD." >&2
   exit 1
 }
