@@ -1,0 +1,13 @@
+diff --git a/drivers/gpu/drm/amd/pm/swsmu/smu11/vangogh_ppt.c b/drivers/gpu/drm/amd/pm/swsmu/smu11/vangogh_ppt.c
+index 0000000..0000000 100644
+--- a/drivers/gpu/drm/amd/pm/swsmu/smu11/vangogh_ppt.c
++++ b/drivers/gpu/drm/amd/pm/swsmu/smu11/vangogh_ppt.c
+@@ -2235,7 +2235,7 @@ static int vangogh_set_default_dpm_table(struct smu_context *smu)
+ 	if (smu->gfx_actual_soft_max_freq == 0)
+ 		smu->gfx_actual_soft_max_freq = smu->gfx_default_soft_max_freq;
+ 
+ 	smu->cpu_default_soft_min_freq = 1400;
+-	smu->cpu_default_soft_max_freq = 3500;
++	smu->cpu_default_soft_max_freq = 4200;
+ 	if (smu->cpu_actual_soft_min_freq == 0)
+ 		smu->cpu_actual_soft_min_freq = smu->cpu_default_soft_min_freq;
