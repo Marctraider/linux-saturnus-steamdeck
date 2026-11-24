@@ -1,0 +1,20 @@
+name: Prepare Saturnus build toolchain
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-toolchain:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Install and validate Clang, LLD, Polly and build dependencies
+        run: bash scripts/setup-llvm-polly.sh
