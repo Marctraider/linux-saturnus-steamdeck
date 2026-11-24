@@ -163,7 +163,7 @@ fragment_path, resolved_path = sys.argv[1:]
 disabled = set()
 with open(fragment_path, encoding="utf-8") as fragment:
     for line in fragment:
-        match = re.match(r"^\\s*(?:#\\s*)?CONFIG_([A-Za-z0-9_]+)(?:=n|\\s+is not set)\\s*$", line)
+        match = re.match(r"^\s*(?:#\s*)?CONFIG_([A-Za-z0-9_]+)(?:=n|\s+is not set)\s*$", line)
         if match:
             disabled.add(match.group(1))
 resolved = {}
