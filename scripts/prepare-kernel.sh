@@ -175,9 +175,21 @@ grep -Fq 'cpu_default_soft_max_freq = 4200;' "$SRC/drivers/gpu/drm/amd/pm/swsmu/
 grep -Fq 'static bool epp_boost __read_mostly = true;' "$SRC/drivers/cpufreq/amd-pstate.c"
 grep -Fq 'module_param_cb(epp_boost' "$SRC/drivers/cpufreq/amd-pstate.c"
 
-required=("CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" "CONFIG_LTO_CLANG_FULL=y" "CONFIG_POLLY_CLANG=y" "CONFIG_X86_AMD_PSTATE_DEFAULT_MODE=3" "CONFIG_BPF=y" "CONFIG_BPF_SYSCALL=y" "CONFIG_BPF_JIT=y" "CONFIG_BPF_JIT_ALWAYS_ON=y" "CONFIG_BPF_JIT_DEFAULT_ON=y" "CONFIG_BPF_EVENTS=y" "CONFIG_DEBUG_INFO=y" "CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=y" "# CONFIG_DEBUG_INFO_REDUCED is not set" "CONFIG_DEBUG_INFO_BTF=y" "CONFIG_TRACING=y" "CONFIG_TRACEFS_FS=y" "CONFIG_DEBUG_FS=y" "CONFIG_FTRACE=y" "CONFIG_FUNCTION_TRACER=y" "CONFIG_FTRACE_SYSCALLS=y" "CONFIG_SCHED_CLASS_EXT=y" "# CONFIG_CPU_MITIGATIONS is not set")
+required=("CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" "CONFIG_LTO_CLANG_FULL=y" "CONFIG_POLLY_CLANG=y" "CONFIG_X86_AMD_PSTATE_DEFAULT_MODE=3" "CONFIG_BPF=y" "CONFIG_BPF_SYSCALL=y" "CONFIG_BPF_JIT=y" "CONFIG_BPF_JIT_ALWAYS_ON=y" "CONFIG_BPF_JIT_DEFAULT_ON=y" "CONFIG_BPF_EVENTS=y" "CONFIG_UPROBE_EVENTS=y" "CONFIG_DEBUG_INFO=y" "CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=y" "# CONFIG_DEBUG_INFO_REDUCED is not set" "CONFIG_DEBUG_INFO_BTF=y" "CONFIG_TRACING=y" "CONFIG_TRACEFS_FS=y" "CONFIG_DEBUG_FS=y" "CONFIG_FTRACE=y" "CONFIG_FUNCTION_TRACER=y" "CONFIG_FTRACE_SYSCALLS=y" "CONFIG_SCHED_CLASS_EXT=y" "# CONFIG_CPU_MITIGATIONS is not set")
 for setting in "${required[@]}"; do
   grep -Fqx "$setting" "$OUT/.config" || { echo "Required setting did not resolve: $setting" >&2; exit 1; }
+done
+
+# Ensure the debug-reduction fragment did not remove LAVD's BPF event path.
+# KPROBES is intentionally off; UPROBE_EVENTS keeps BPF_EVENTS available.
+disabled=(KPROBES PM_DEBUG PM_SLEEP_DEBUG ACPI_DEBUG DM_DEBUG SND_DEBUG SLUB_DEBUG
+          DEBUG_RODATA_TEST DEBUG_SHIRQ SHRINKER_DEBUG IKHEADERS PAGE_POISONING
+          PROFILING SCHEDSTATS FUNCTION_ERROR_INJECTION RUNTIME_TESTING_MENU KALLSYMS_ALL)
+for symbol in "${disabled[@]}"; do
+  grep -Fqx "# CONFIG_${symbol} is not set" "$OUT/.config" || {
+    echo "Debug-reduction setting did not resolve as disabled: CONFIG_${symbol}" >&2
+    exit 1
+  }
 done
 
 {
