@@ -1,0 +1,71 @@
+name: Publish Saturnus kernel release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - installer.sh
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download successful kernel build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: saturnus-kernel-install-r1
+          path: release-assets
+          repository: Marctraider/linux-saturnus-steamdeck
+          run-id: "45427609792"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify bundle and derive release tag
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          test -s linux-saturnus.tar.zst
+          test -s manifest.txt
+          test -s SHA256SUMS
+          sha256sum --check SHA256SUMS
+          run="$(sed -n 's/^build_id=//p' manifest.txt)"
+          kernel_release="$(sed -n 's/^kernel_release=//p' manifest.txt)"
+          source_commit="$(sed -n 's/^source_commit=//p' manifest.txt)"
+          [[ "$run" == "1" ]]
+          [[ "$source_commit" == "52f69f990706fa4d0eb0dd08c1b950a42c5dacd7" ]]
+          [[ "$kernel_release" == "7.3.1-valve3-saturnus-r${run}-g${source_commit:0:12}-dirty" ]]
+          echo "tag=v7.3.1-valve3-saturnus-r${run}" >> "$GITHUB_OUTPUT"
+          echo "kernel_release=$kernel_release" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.metadata.outputs.tag }}
+          target_commitish: 468e295677155f1bdd48a137cf44e4a5bf143796
+          name: Saturnus Kernel r1
+          body: |
+            Saturnus Steam Deck kernel, based on Valve kernel 7.3.1-valve3.
+
+            - Kernel release: `${{ steps.metadata.outputs.kernel_release }}`
+            - Valve source commit: `${{ steps.metadata.outputs.source_commit }}`
+            - Build workflow: [run #10](https://github.com/Marctraider/linux-saturnus-steamdeck/actions/runs/45427609792)
+            - Clang + LLD, Polly, Full LTO, O2 and Zen 2 target
+            - Module debug symbols stripped during modules_install
+            - Includes the kernel image, module tree, manifest and SHA256 checksum
+
+            Use the repository's `installer.sh` on SteamOS 3.10.x. The installer
+            preserves the existing SteamOS boot paths, creates a new initramfs,
+            keeps rollback copies, and does not reboot automatically.
+          files: |
+            release-assets/linux-saturnus.tar.zst
+            release-assets/manifest.txt
+            release-assets/SHA256SUMS
+          fail_on_unmatched_files: true
+          make_latest: true
+          prerelease: false
