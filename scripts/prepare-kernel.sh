@@ -54,10 +54,10 @@ git -C "$SRC" checkout --detach FETCH_HEAD
 ACTUAL_COMMIT="$(git -C "$SRC" rev-parse HEAD)"
 [[ "$ACTUAL_COMMIT" == "$SOURCE_COMMIT" ]] || { echo "Unexpected Valve source commit: $ACTUAL_COMMIT" >&2; exit 1; }
 
-git -C "$SRC" apply --check "$ROOT/patches/0001-polly-clang.patch"
-git -C "$SRC" apply "$ROOT/patches/0001-polly-clang.patch"
-git -C "$SRC" apply --check "$ROOT/patches/0003-gud-full-lto.patch"
-git -C "$SRC" apply "$ROOT/patches/0003-gud-full-lto.patch"
+git -C "$SRC" apply --check "$ROOT/patches/0001-clang-polly.patch"
+git -C "$SRC" apply "$ROOT/patches/0001-clang-polly.patch"
+git -C "$SRC" apply --check "$ROOT/patches/0003-gud-clang-lto-overflow.patch"
+git -C "$SRC" apply "$ROOT/patches/0003-gud-clang-lto-overflow.patch"
 git -C "$SRC" apply --check "$ROOT/patches/0004-vangogh-4.2ghz.patch"
 git -C "$SRC" apply "$ROOT/patches/0004-vangogh-4.2ghz.patch"
 
