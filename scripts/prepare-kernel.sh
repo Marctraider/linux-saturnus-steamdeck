@@ -157,10 +157,13 @@ disabled=(KPROBES PM_DEBUG PM_SLEEP_DEBUG ACPI_DEBUG DM_DEBUG SND_DEBUG SLUB_DEB
           DEBUG_RODATA_TEST DEBUG_SHIRQ SHRINKER_DEBUG IKHEADERS PAGE_POISONING
           PROFILING SCHEDSTATS FUNCTION_ERROR_INJECTION RUNTIME_TESTING_MENU KALLSYMS_ALL)
 for symbol in "${disabled[@]}"; do
-  grep -Fqx "# CONFIG_${symbol} is not set" "$OUT/.config" || {
+  # Hidden Kconfig symbols can be correctly disabled yet omitted from .config.
+  # Treat both an explicit "not set" line and an absent symbol as disabled;
+  # fail only if the resolved config enables the symbol.
+  if grep -Eq "^CONFIG_${symbol}=(y|m)$" "$OUT/.config"; then
     echo "Debug-reduction setting did not resolve as disabled: CONFIG_${symbol}" >&2
     exit 1
-  }
+  fi
 done
 
 {
