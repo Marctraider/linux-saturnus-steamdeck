@@ -1,0 +1,56 @@
+name: Prepare Saturnus kernel (no build)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: saturnus-kernel-prepare
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 180
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Configure persistent runner directories
+        shell: bash
+        run: |
+          WORK="$HOME/.cache/linux-saturnus-steamdeck/kernel-build"
+          CCACHE_DIR="$HOME/.cache/linux-saturnus-steamdeck/ccache"
+          mkdir -p "$WORK" "$CCACHE_DIR"
+          echo "KERNEL_WORK_DIR=$WORK" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=30G" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPRESS=true" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+
+      - name: Verify installed toolchain and cache
+        shell: bash
+        run: |
+          command -v ccache
+          command -v clang-22 || command -v clang
+          command -v ld.lld-22 || command -v ld.lld
+          command -v llvm-config-22 || command -v llvm-config
+          ccache --show-stats
+
+      - name: Fetch Valve source, apply approved patches and prepare config only
+        run: bash scripts/prepare-kernel.sh "$KERNEL_WORK_DIR"
+
+      - name: Upload preparation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saturnus-preparation-${{ github.run_number }}
+          path: |
+            ${{ env.KERNEL_WORK_DIR }}/out/.config
+            ${{ env.KERNEL_WORK_DIR }}/resolved.config
+            ${{ env.KERNEL_WORK_DIR }}/preparation-report.txt
+          if-no-files-found: warn
+          retention-days: 30
