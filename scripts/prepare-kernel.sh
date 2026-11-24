@@ -64,7 +64,7 @@ git -C "$SRC" apply "$ROOT/patches/0004-vangogh-4.2ghz.patch"
 fetch_lkml_patch() {
   local filename="$1" url="$2" exclude="${3:-}"
   local html="$WORK/$filename.html" patch="$WORK/$filename"
-  curl --fail --location --retry 4 --retry-delay 3 "$url" --output "$html"
+  curl --fail --location --retry 4 --retry-all-errors --retry-delay 3 "$url" --output "$html"
   python3 - "$html" "$patch" <<'PY'
 from html.parser import HTMLParser
 import sys
