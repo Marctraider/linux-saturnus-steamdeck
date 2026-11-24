@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 WORK="${1:-${KERNEL_WORK_DIR:-$HOME/.cache/linux-saturnus-steamdeck/kernel-build}}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$WORK/src"
 OUT="$WORK/out"
 VALVE_CONFIG="$WORK/valve-config"
-ARCHIVE="$WORK/linux-neptune-73-7.3.1.valve3-1.src.tar.gz"
-URL="https://steamdeck-packages.steamos.cloud/archlinux-mirror/sources/jupiter-main/linux-neptune-73-7.3.1.valve3-1.src.tar.gz"
 SOURCE_REPO="https://github.com/evlaV/linux-integration.git"
 SOURCE_COMMIT="52f69f990706fa4d0eb0dd08c1b950a42c5dacd7"
-
+VALVE_ARCHIVE_URL="https://steamdeck-packages.steamos.cloud/archlinux-mirror/jupiter-main/os/x86_64/linux-neptune-73-7.3.1.valve3-1-x86_64.pkg.tar.zst"
+LLVM_SUFFIX=""
 if command -v clang-22 >/dev/null && command -v ld.lld-22 >/dev/null && command -v llvm-config-22 >/dev/null; then
   CLANG=clang-22; LLD=ld.lld-22; LLVM_CONFIG=llvm-config-22; LLVM_SUFFIX=-22
 elif command -v clang >/dev/null && command -v ld.lld >/dev/null && command -v llvm-config >/dev/null; then
@@ -18,13 +18,17 @@ else
   echo "A matching Clang, LLD and llvm-config toolchain is required." >&2
   exit 1
 fi
-
 for tool in curl tar gzip git make sha256sum find install pahole; do
   command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
-[[ -f "$ROOT/config/saturnus.config" ]] || { echo "Missing config/saturnus.config" >&2; exit 1; }
 
-PAHOLE_VERSION="$(pahole --version | awk '{print $NF}')"
+mkdir -p "$WORK" "$VALVE_CONFIG" "$OUT"
+LLVM_LIBDIR="$("$LLVM_CONFIG" --libdir)"
+POLLY_PLUGIN="$(find "$LLVM_LIBDIR" /usr/lib -name LLVMPolly.so -type f -print -quit 2>/dev/null || true)"
+[[ -n "$POLLY_PLUGIN" ]] || { echo "LLVMPolly.so not found for $CLANG." >&2; exit 1; }
+export LLVM_PLUGIN_PATH="$(dirname "$POLLY_PLUGIN")"
+
+PAHOLE_VERSION="$(pahole --version 2>&1 | head -n 1)"
 python3 - "$PAHOLE_VERSION" <<'PY'
 import re, sys
 match = re.search(r"(\d+)\.(\d+)", sys.argv[1])
@@ -32,60 +36,31 @@ if not match or tuple(map(int, match.groups())) < (1, 25):
     raise SystemExit(f"pahole >= 1.25 is required for kernel BTF; found {sys.argv[1]}")
 PY
 
-LLVM_LIBDIR="$("$LLVM_CONFIG" --libdir)"
-POLLY_PLUGIN="$(find "$LLVM_LIBDIR" /usr/lib -name LLVMPolly.so -type f -print -quit 2>/dev/null || true)"
-[[ -n "$POLLY_PLUGIN" ]] || { echo "LLVMPolly.so is not installed for the active LLVM toolchain." >&2; exit 1; }
-export LLVM_PLUGIN_PATH="$(dirname "$POLLY_PLUGIN")"
-
-mkdir -p "$WORK" "$OUT" "$VALVE_CONFIG"
-if [[ ! -s "$ARCHIVE" ]] || ! gzip -t "$ARCHIVE" >/dev/null 2>&1; then
-  echo "Downloading/resuming Valve's linux-neptune 7.3.1.valve3 source package..."
-  curl --fail --location --retry 5 --retry-delay 10 --continue-at - "$URL" --output "$ARCHIVE"
-fi
-
 if [[ ! -s "$VALVE_CONFIG/config.x86_64" || ! -s "$VALVE_CONFIG/config-neptune" ]]; then
-  TMP_EXTRACT="$(mktemp -d "$WORK/config-extract.XXXXXX")"
-  trap 'rm -rf "$TMP_EXTRACT"' EXIT
-  echo "Extracting Valve's base and Steam Deck configuration files..."
-  tar -xzf "$ARCHIVE" -C "$TMP_EXTRACT" --wildcards --no-anchored 'config.x86_64' 'config-neptune'
-  BASE_CONFIG="$(find "$TMP_EXTRACT" -type f -name config.x86_64 -print -quit)"
-  DECK_CONFIG="$(find "$TMP_EXTRACT" -type f -name config-neptune -print -quit)"
-  [[ -n "$BASE_CONFIG" && -n "$DECK_CONFIG" ]] || { echo "Valve archive is missing its expected config files." >&2; exit 1; }
-  install -m 0644 "$BASE_CONFIG" "$VALVE_CONFIG/config.x86_64"
-  install -m 0644 "$DECK_CONFIG" "$VALVE_CONFIG/config-neptune"
-  sha256sum "$ARCHIVE" > "$VALVE_CONFIG/source-archive.sha256"
+  PACKAGE="$WORK/linux-neptune-73.pkg.tar.zst"
+  curl --fail --location --retry 4 "$VALVE_ARCHIVE_URL" --output "$PACKAGE"
+  sha256sum "$PACKAGE" > "$VALVE_CONFIG/source-archive.sha256"
+  tar --zstd -xf "$PACKAGE" -C "$VALVE_CONFIG" ./usr/lib/modules/7.3.1-valve3/build/.config
+  tar --zstd -xf "$PACKAGE" -C "$VALVE_CONFIG" ./usr/lib/modules/7.3.1-valve3/build/config-neptune
+  cp "$VALVE_CONFIG/usr/lib/modules/7.3.1-valve3/build/.config" "$VALVE_CONFIG/config.x86_64"
+  cp "$VALVE_CONFIG/usr/lib/modules/7.3.1-valve3/build/config-neptune" "$VALVE_CONFIG/config-neptune"
 fi
 
 if [[ ! -d "$SRC/.git" ]]; then
-  mkdir -p "$SRC"
-  git -C "$SRC" init
+  git clone --filter=blob:none "$SOURCE_REPO" "$SRC"
 fi
-if git -C "$SRC" remote get-url origin >/dev/null 2>&1; then
-  git -C "$SRC" remote set-url origin "$SOURCE_REPO"
-else
-  git -C "$SRC" remote add origin "$SOURCE_REPO"
-fi
-
-echo "Fetching pinned Valve kernel source commit..."
 git -C "$SRC" fetch --depth=1 origin "$SOURCE_COMMIT"
-git -C "$SRC" checkout --detach --force FETCH_HEAD
-git -C "$SRC" reset --hard "$SOURCE_COMMIT"
-git -C "$SRC" clean -fdx
+git -C "$SRC" checkout --detach FETCH_HEAD
 ACTUAL_COMMIT="$(git -C "$SRC" rev-parse HEAD)"
-[[ "$ACTUAL_COMMIT" == "$SOURCE_COMMIT" ]] || { echo "Kernel source commit mismatch: $ACTUAL_COMMIT" >&2; exit 1; }
+[[ "$ACTUAL_COMMIT" == "$SOURCE_COMMIT" ]] || { echo "Unexpected Valve source commit: $ACTUAL_COMMIT" >&2; exit 1; }
 
-for patch in "$ROOT/patches/0001-clang-polly.patch" "$ROOT/patches/0003-gud-clang-lto-overflow.patch"; do
-  git -C "$SRC" apply --check "$patch"
-  git -C "$SRC" apply "$patch"
-done
+git -C "$SRC" apply --check "$ROOT/patches/0001-polly-clang.patch"
+git -C "$SRC" apply "$ROOT/patches/0001-polly-clang.patch"
+git -C "$SRC" apply --check "$ROOT/patches/0003-gud-full-lto.patch"
+git -C "$SRC" apply "$ROOT/patches/0003-gud-full-lto.patch"
+git -C "$SRC" apply --check "$ROOT/patches/0004-vangogh-4.2ghz.patch"
+git -C "$SRC" apply "$ROOT/patches/0004-vangogh-4.2ghz.patch"
 
-# Raise the Van Gogh CPU soft maximum from 3.5 GHz to 4.2 GHz.
-VANGOGH_PATCH="$ROOT/patches/0004-vangogh-4.2ghz.patch"
-git -C "$SRC" apply --check "$VANGOGH_PATCH"
-git -C "$SRC" apply "$VANGOGH_PATCH"
-
-# Port the AMD P-State per-core EPP Boost implementation used by the
-# previous successful-build repository. RFC patches are fetched from LKML.
 fetch_lkml_patch() {
   local filename="$1" url="$2" exclude="${3:-}"
   local html="$WORK/$filename.html" patch="$WORK/$filename"
@@ -122,7 +97,6 @@ PY
 fetch_lkml_patch "0002-amd-pstate-epp-cache-order.patch" "https://lists.openwall.net/linux-kernel/2026/07/28/666"
 fetch_lkml_patch "0003-amd-pstate-epp-boost.patch" "https://lists.openwall.net/linux-kernel/2026/07/28/678" "drivers/cpufreq/amd-pstate.h"
 
-# Add the RFC state to the existing amd_cpu_data structure using unique anchors.
 python3 - "$SRC/drivers/cpufreq/amd-pstate.h" <<'PY'
 import sys
 path = sys.argv[1]
@@ -156,12 +130,8 @@ with open(path, "w", encoding="utf-8") as output:
     output.write(text)
 PY
 
-# Set the downstream feature default to enabled; amd_pstate.epp_boost=0 disables it.
 EPP_SOURCE="$SRC/drivers/cpufreq/amd-pstate.c"
-if [[ "$(grep -Fc 'static bool epp_boost __read_mostly;' "$EPP_SOURCE")" -ne 1 ]]; then
-  echo "Could not find exactly one EPP boost default declaration." >&2
-  exit 1
-fi
+grep -Fq 'static bool epp_boost __read_mostly;' "$EPP_SOURCE"
 sed -i 's/static bool epp_boost __read_mostly;/static bool epp_boost __read_mostly = true;/' "$EPP_SOURCE"
 
 "$SRC/scripts/kconfig/merge_config.sh" -m -O "$OUT" \
@@ -170,18 +140,15 @@ make -C "$SRC" O="$OUT" LLVM="$LLVM_SUFFIX" CC="$CLANG" LD="$LLD" olddefconfig
 "$CLANG" -march=znver2 -fsyntax-only -x c /dev/null
 cp "$OUT/.config" "$WORK/resolved.config"
 
-# Validate that both CPU tunings made it into the prepared source.
 grep -Fq 'cpu_default_soft_max_freq = 4200;' "$SRC/drivers/gpu/drm/amd/pm/swsmu/smu11/vangogh_ppt.c"
-grep -Fq 'static bool epp_boost __read_mostly = true;' "$SRC/drivers/cpufreq/amd-pstate.c"
-grep -Fq 'module_param_cb(epp_boost' "$SRC/drivers/cpufreq/amd-pstate.c"
+grep -Fq 'static bool epp_boost __read_mostly = true;' "$EPP_SOURCE"
+grep -Fq 'module_param_cb(epp_boost' "$EPP_SOURCE"
 
-required=("CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" "CONFIG_LTO_CLANG_FULL=y" "CONFIG_POLLY_CLANG=y" "CONFIG_X86_AMD_PSTATE_DEFAULT_MODE=3" "CONFIG_BPF=y" "CONFIG_BPF_SYSCALL=y" "CONFIG_BPF_JIT=y" "CONFIG_BPF_JIT_ALWAYS_ON=y" "CONFIG_BPF_JIT_DEFAULT_ON=y" "CONFIG_BPF_EVENTS=y" "CONFIG_UPROBE_EVENTS=y" "CONFIG_DEBUG_INFO=y" "CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=y" "# CONFIG_DEBUG_INFO_REDUCED is not set" "CONFIG_DEBUG_INFO_BTF=y" "CONFIG_TRACING=y" "CONFIG_TRACEFS_FS=y" "CONFIG_DEBUG_FS=y" "CONFIG_FTRACE=y" "CONFIG_FUNCTION_TRACER=y" "CONFIG_FTRACE_SYSCALLS=y" "CONFIG_SCHED_CLASS_EXT=y" "# CONFIG_CPU_MITIGATIONS is not set")
+required=("CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" "CONFIG_LTO_CLANG_FULL=y" "CONFIG_POLLY_CLANG=y" "CONFIG_X86_AMD_PSTATE_DEFAULT_MODE=3" "CONFIG_BPF=y" "CONFIG_BPF_SYSCALL=y" "CONFIG_BPF_JIT=y" "CONFIG_BPF_JIT_ALWAYS_ON=y" "CONFIG_BPF_JIT_DEFAULT_ON=y" "CONFIG_BPF_EVENTS=y" "CONFIG_UPROBE_EVENTS=y" "CONFIG_DEBUG_INFO=y" "CONFIG_DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=y" "# CONFIG_DEBUG_INFO_REDUCED is not set" "CONFIG_DEBUG_INFO_BTF=y" "CONFIG_TRACING=y" "CONFIG_TRACEFS_FS=y" "CONFIG_DEBUG_FS=y" "CONFIG_FTRACE=y" "CONFIG_FUNCTION_TRACER=y" "CONFIG_FTRACE_SYSCALLS=y" "CONFIG_SCHED_CLASS_EXT=y" "CONFIG_NTSYNC=y" "# CONFIG_CPU_MITIGATIONS is not set")
 for setting in "${required[@]}"; do
   grep -Fqx "$setting" "$OUT/.config" || { echo "Required setting did not resolve: $setting" >&2; exit 1; }
 done
 
-# Ensure the debug-reduction fragment did not remove LAVD's BPF event path.
-# KPROBES is intentionally off; UPROBE_EVENTS keeps BPF_EVENTS available.
 disabled=(KPROBES PM_DEBUG PM_SLEEP_DEBUG ACPI_DEBUG DM_DEBUG SND_DEBUG SLUB_DEBUG
           DEBUG_RODATA_TEST DEBUG_SHIRQ SHRINKER_DEBUG IKHEADERS PAGE_POISONING
           PROFILING SCHEDSTATS FUNCTION_ERROR_INJECTION RUNTIME_TESTING_MENU KALLSYMS_ALL)
@@ -197,9 +164,9 @@ done
   echo "Source repository: $SOURCE_REPO"
   echo "Source commit: $ACTUAL_COMMIT"
   echo "Source archive SHA256: $(awk '{print $1}' "$VALVE_CONFIG/source-archive.sha256")"
-  echo "Clang: $("$CLANG" --version | head -n 1)"
-  echo "LLD: $("$LLD" --version)"
-  echo "LLVM: $("$LLVM_CONFIG" --version)"
+  echo "Clang: $("$(command -v "$CLANG")" --version | head -n 1)"
+  echo "LLD: $("$(command -v "$LLD")" --version)"
+  echo "LLVM: $("$(command -v "$LLVM_CONFIG")" --version)"
   echo "Polly plugin: $POLLY_PLUGIN"
   echo "pahole: $PAHOLE_VERSION"
   echo "Polly integration: applied"
