@@ -167,7 +167,7 @@ grep -Fq 'cpu_default_soft_max_freq = 4200;' "$SRC/drivers/gpu/drm/amd/pm/swsmu/
 grep -Fq 'static bool epp_boost __read_mostly = true;' "$SRC/drivers/cpufreq/amd-pstate.c"
 grep -Fq 'module_param_cb(epp_boost' "$SRC/drivers/cpufreq/amd-pstate.c"
 
-required=("CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" "CONFIG_LTO_CLANG_FULL=y" "CONFIG_POLLY_CLANG=y" "CONFIG_X86_AMD_PSTATE_DEFAULT_MODE=3" "CONFIG_BPF=y" "CONFIG_BPF_SYSCALL=y" "CONFIG_BPF_JIT=y" "CONFIG_BPF_JIT_ALWAYS_ON=y" "CONFIG_BPF_JIT_DEFAULT_ON=y" "CONFIG_DEBUG_INFO_BTF=y" "CONFIG_SCHED_CLASS_EXT=y" "# CONFIG_CPU_MITIGATIONS is not set")
+required=("CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" "CONFIG_LTO_CLANG_FULL=y" "CONFIG_POLLY_CLANG=y" "CONFIG_X86_AMD_PSTATE_DEFAULT_MODE=3" "CONFIG_BPF=y" "CONFIG_BPF_SYSCALL=y" "CONFIG_BPF_JIT=y" "CONFIG_BPF_JIT_ALWAYS_ON=y" "CONFIG_BPF_JIT_DEFAULT_ON=y" "CONFIG_DEBUG_INFO=y" "CONFIG_DEBUG_INFO_BTF=y" "CONFIG_TRACING=y" "CONFIG_TRACEFS_FS=y" "CONFIG_DEBUG_FS=y" "CONFIG_FTRACE=y" "CONFIG_SCHED_CLASS_EXT=y" "# CONFIG_CPU_MITIGATIONS is not set")
 for setting in "${required[@]}"; do
   grep -Fqx "$setting" "$OUT/.config" || { echo "Required setting did not resolve: $setting" >&2; exit 1; }
 done
