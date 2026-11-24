@@ -45,6 +45,24 @@ RELEASE="$(make -s -C "$SRC" O="$OUT" LLVM="$LLVM_SUFFIX" CC="$CLANG" LD="$LLD" 
 SOURCE_COMMIT="$(git -C "$SRC" rev-parse HEAD)"
 test -s "$OUT/arch/x86/boot/bzImage"
 test -s "$OUT/System.map"
+test -s "$OUT/vmlinux"
+
+# sched_ext/LAVD needs usable kernel BTF at runtime. Verify that the linked,
+# unstripped vmlinux actually contains the .BTF section before packaging.
+if command -v "llvm-readelf$LLVM_SUFFIX" >/dev/null 2>&1; then
+  READELF="llvm-readelf$LLVM_SUFFIX"
+elif command -v llvm-readelf >/dev/null 2>&1; then
+  READELF=llvm-readelf
+elif command -v readelf >/dev/null 2>&1; then
+  READELF=readelf
+else
+  echo "readelf/llvm-readelf is required to verify kernel BTF." >&2
+  exit 1
+fi
+"$READELF" -S "$OUT/vmlinux" | grep -Eq '[[:space:]]\\.BTF([[:space:]]|$)' || {
+  echo "Linked vmlinux has no .BTF section; refusing to package a kernel unusable by LAVD." >&2
+  exit 1
+}
 
 STAGE="${RUNNER_TEMP:-$WORK}/saturnus-package-root"
 BUNDLE="${RUNNER_TEMP:-$WORK}/saturnus-install-bundle"
