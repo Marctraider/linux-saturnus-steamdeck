@@ -1,0 +1,27 @@
+From: linux-charcoal-conservative
+Subject: [PATCH] drm/gud: avoid Clang LTO read-overflow link failure
+
+Restore the bounded NUL-termination used by the pinned Valve source.
+The later memchr validation change triggers an __read_overflow linker
+diagnostic with the current Clang/LLD Full LTO and O3 build.
+
+This retains the original bounded fixed-size name handling and avoids
+disabling LTO, O3, Polly, or the GUD driver.
+
+diff --git a/drivers/gpu/drm/gud/gud_connector.c b/drivers/gpu/drm/gud/gud_connector.c
+--- a/drivers/gpu/drm/gud/gud_connector.c
++++ b/drivers/gpu/drm/gud/gud_connector.c
+@@ -399,11 +399,8 @@ static int gud_connector_add_tv_mode(struct gud_device *gdrm, struct drm_connect
+ 	for (i = 0; i < num_modes; i++) {
+ 		char *mode = &buf[i * GUD_CONNECTOR_TV_MODE_NAME_LEN];
+ 
+-		if (!memchr(mode, '\0', GUD_CONNECTOR_TV_MODE_NAME_LEN)) {
+-			ret = -EIO;
+-			goto free;
+-		}
+-
++		/* The device is not trusted to NUL-terminate the name */
++		mode[GUD_CONNECTOR_TV_MODE_NAME_LEN - 1] = '\0';
+ 		modes[i] = mode;
+ 	}
+ 
