@@ -71,11 +71,101 @@ for patch in "$ROOT/patches/0001-clang-polly.patch" "$ROOT/patches/0003-gud-clan
   git -C "$SRC" apply "$patch"
 done
 
+# Raise the Van Gogh CPU soft maximum from 3.5 GHz to 4.2 GHz.
+VANGOGH_PATCH="$ROOT/patches/0004-vangogh-4.2ghz.patch"
+git -C "$SRC" apply --check "$VANGOGH_PATCH"
+git -C "$SRC" apply "$VANGOGH_PATCH"
+
+# Port the AMD P-State per-core EPP Boost implementation used by the
+# previous successful-build repository. RFC patches are fetched from LKML.
+fetch_lkml_patch() {
+  local filename="$1" url="$2" exclude="${3:-}"
+  local html="$WORK/$filename.html" patch="$WORK/$filename"
+  curl --fail --location --retry 4 --retry-delay 3 "$url" --output "$html"
+  python3 - "$html" "$patch" <<'PY'
+from html.parser import HTMLParser
+import sys
+class ArchiveText(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+    def handle_data(self, data):
+        self.parts.append(data)
+parser = ArchiveText()
+with open(sys.argv[1], encoding="utf-8") as source:
+    parser.feed(source.read())
+mail = "".join(parser.parts)
+start = mail.find("diff --git ")
+if start < 0:
+    raise SystemExit("No unified diff found in LKML archive page")
+with open(sys.argv[2], "w", encoding="utf-8") as output:
+    output.write(mail[start:])
+PY
+  if [[ "$exclude" == "download-only" ]]; then
+    return
+  elif [[ -n "$exclude" ]]; then
+    git -C "$SRC" apply --check --exclude="$exclude" "$patch"
+    git -C "$SRC" apply --exclude="$exclude" "$patch"
+  else
+    git -C "$SRC" apply --check "$patch"
+    git -C "$SRC" apply "$patch"
+  fi
+}
+fetch_lkml_patch "0002-amd-pstate-epp-cache-order.patch" "https://lists.openwall.net/linux-kernel/2026/07/28/666"
+fetch_lkml_patch "0003-amd-pstate-epp-boost.patch" "https://lists.openwall.net/linux-kernel/2026/07/28/678" "drivers/cpufreq/amd-pstate.h"
+
+# Add the RFC state to the existing amd_cpu_data structure using unique anchors.
+python3 - "$SRC/drivers/cpufreq/amd-pstate.h" <<'PY'
+import sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as source:
+    text = source.read()
+def replace_once(old, new, label):
+    global text
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"Expected one {label} anchor, found {count}")
+    text = text.replace(old, new, 1)
+if "#include <linux/sched/cpufreq.h>" not in text:
+    replace_once("#include <linux/platform_profile.h>\n", "#include <linux/platform_profile.h>\n#include <linux/sched/cpufreq.h>\n", "sched/cpufreq include")
+if "@epp_boost_update_util:" not in text:
+    replace_once(" * @profile_name: Name under which @ppdev is registered\n",
+                 " * @profile_name: Name under which @ppdev is registered\n"
+                 " * @epp_boost_update_util: per-core EPP boost update-util hook\n"
+                 " * @epp_boost_last_sample: last C0 residency sample in ns\n"
+                 " * @epp_boost_last_busy: last busy sample in ns\n"
+                 " * @epp_boost_active: whether per-core EPP boost is active\n"
+                 " * @epp_boost_registered: whether update-util hook is registered\n", "EPP kernel-doc")
+if "struct update_util_data epp_boost_update_util;" not in text:
+    replace_once("\tchar *profile_name;\n",
+                 "\tchar *profile_name;\n\n\t/* Per-core EPP boost state (MSR active mode). */\n"
+                 "\tstruct update_util_data epp_boost_update_util;\n"
+                 "\tu64 epp_boost_last_sample;\n"
+                 "\tu64 epp_boost_last_busy;\n"
+                 "\tbool epp_boost_active;\n"
+                 "\tbool epp_boost_registered;\n", "EPP struct members")
+with open(path, "w", encoding="utf-8") as output:
+    output.write(text)
+PY
+
+# Set the downstream feature default to enabled; amd_pstate.epp_boost=0 disables it.
+EPP_SOURCE="$SRC/drivers/cpufreq/amd-pstate.c"
+if [[ "$(grep -Fc 'static bool epp_boost __read_mostly;' "$EPP_SOURCE")" -ne 1 ]]; then
+  echo "Could not find exactly one EPP boost default declaration." >&2
+  exit 1
+fi
+sed -i 's/static bool epp_boost __read_mostly;/static bool epp_boost __read_mostly = true;/' "$EPP_SOURCE"
+
 "$SRC/scripts/kconfig/merge_config.sh" -m -O "$OUT" \
   "$VALVE_CONFIG/config.x86_64" "$VALVE_CONFIG/config-neptune" "$ROOT/config/saturnus.config"
 make -C "$SRC" O="$OUT" LLVM="$LLVM_SUFFIX" CC="$CLANG" LD="$LLD" olddefconfig
 "$CLANG" -march=znver2 -fsyntax-only -x c /dev/null
 cp "$OUT/.config" "$WORK/resolved.config"
+
+# Validate that both CPU tunings made it into the prepared source.
+grep -Fq 'cpu_default_soft_max_freq = 4200;' "$SRC/drivers/gpu/drm/amd/pm/swsmu/smu11/vangogh_ppt.c"
+grep -Fq 'static bool epp_boost __read_mostly = true;' "$SRC/drivers/cpufreq/amd-pstate.c"
+grep -Fq 'module_param_cb(epp_boost' "$SRC/drivers/cpufreq/amd-pstate.c"
 
 required=("CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" "CONFIG_LTO_CLANG_FULL=y" "CONFIG_POLLY_CLANG=y" "# CONFIG_CPU_MITIGATIONS is not set")
 for setting in "${required[@]}"; do
