@@ -51,6 +51,10 @@ if [[ ! -d "$SRC/.git" ]]; then
 fi
 git -C "$SRC" fetch --depth=1 origin "$SOURCE_COMMIT"
 git -C "$SRC" checkout --detach FETCH_HEAD
+# The persistent self-hosted runner reuses this checkout. Remove patches and
+# other tracked/untracked changes left by earlier preparation attempts.
+git -C "$SRC" reset --hard "$SOURCE_COMMIT"
+git -C "$SRC" clean -fd
 ACTUAL_COMMIT="$(git -C "$SRC" rev-parse HEAD)"
 [[ "$ACTUAL_COMMIT" == "$SOURCE_COMMIT" ]] || { echo "Unexpected Valve source commit: $ACTUAL_COMMIT" >&2; exit 1; }
 
