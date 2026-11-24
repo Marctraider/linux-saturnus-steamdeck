@@ -167,7 +167,7 @@ grep -Fq 'cpu_default_soft_max_freq = 4200;' "$SRC/drivers/gpu/drm/amd/pm/swsmu/
 grep -Fq 'static bool epp_boost __read_mostly = true;' "$SRC/drivers/cpufreq/amd-pstate.c"
 grep -Fq 'module_param_cb(epp_boost' "$SRC/drivers/cpufreq/amd-pstate.c"
 
-required=("CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" "CONFIG_LTO_CLANG_FULL=y" "CONFIG_POLLY_CLANG=y" "# CONFIG_CPU_MITIGATIONS is not set")
+required=("CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" "CONFIG_LTO_CLANG_FULL=y" "CONFIG_POLLY_CLANG=y" "CONFIG_X86_AMD_PSTATE_DEFAULT_MODE=3" "# CONFIG_CPU_MITIGATIONS is not set")
 for setting in "${required[@]}"; do
   grep -Fqx "$setting" "$OUT/.config" || { echo "Required setting did not resolve: $setting" >&2; exit 1; }
 done
@@ -183,11 +183,12 @@ done
   echo "Polly plugin: $POLLY_PLUGIN"
   echo "Polly integration: applied"
   echo "GUD Clang/LLD LTO compatibility fix: applied"
-  echo "Van Gogh 4.2 GHz patch: not applied"
+  echo "Van Gogh 4.2 GHz patch: applied"
   echo "Optimization: O2"
   echo "LTO: Full LTO"
   echo "CPU target: -march=znver2"
   echo "CPU mitigation framework: disabled"
+  echo "AMD P-State default mode: active (EPP)"
   echo "Resolved configuration: $OUT/.config"
 } > "$WORK/preparation-report.txt"
 
