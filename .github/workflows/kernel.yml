@@ -1,0 +1,74 @@
+name: Build Saturnus Steam Deck kernel
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: saturnus-kernel-build
+  cancel-in-progress: false
+
+jobs:
+  kernel:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 720
+    env:
+      BUILD_RUN: ${{ github.run_number }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Configure persistent runner directories
+        shell: bash
+        run: |
+          WORK="$HOME/.cache/linux-saturnus-steamdeck/kernel-build"
+          CCACHE_DIR="$HOME/.cache/linux-saturnus-steamdeck/ccache"
+          mkdir -p "$WORK" "$CCACHE_DIR"
+          echo "KERNEL_WORK_DIR=$WORK" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=30G" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPRESS=true" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+
+      - name: Verify installed toolchain and show cache
+        run: |
+          command -v clang
+          command -v ld.lld
+          command -v llvm-config
+          command -v ccache
+          ccache --show-stats
+          ccache --zero-stats
+
+      - name: Fetch Valve source, apply approved patches and prepare config
+        run: bash scripts/prepare-kernel.sh "$KERNEL_WORK_DIR"
+
+      - name: Build kernel and package stripped modules
+        run: bash scripts/build-kernel.sh "$KERNEL_WORK_DIR" "$BUILD_RUN"
+
+      - name: Upload resolved Valve-based configuration
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saturnus-kernel-config-r${{ github.run_number }}
+          path: |
+            ${{ env.KERNEL_WORK_DIR }}/out/.config
+            ${{ env.KERNEL_WORK_DIR }}/preparation-report.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload install bundle
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saturnus-kernel-install-r${{ github.run_number }}
+          path: ${{ runner.temp }}/saturnus-install-bundle/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Show final compiler cache statistics
+        if: always()
+        run: ccache --show-stats || true
