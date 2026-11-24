@@ -19,10 +19,18 @@ else
   exit 1
 fi
 
-for tool in curl tar gzip git make sha256sum find install; do
+for tool in curl tar gzip git make sha256sum find install pahole; do
   command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
 done
 [[ -f "$ROOT/config/saturnus.config" ]] || { echo "Missing config/saturnus.config" >&2; exit 1; }
+
+PAHOLE_VERSION="$(pahole --version | awk '{print $NF}')"
+python3 - "$PAHOLE_VERSION" <<'PY'
+import re, sys
+match = re.match(r"(\\d+)\\.(\\d+)", sys.argv[1])
+if not match or tuple(map(int, match.groups())) < (1, 25):
+    raise SystemExit(f"pahole >= 1.25 is required for kernel BTF; found {sys.argv[1]}")
+PY
 
 LLVM_LIBDIR="$("$LLVM_CONFIG" --libdir)"
 POLLY_PLUGIN="$(find "$LLVM_LIBDIR" /usr/lib -name LLVMPolly.so -type f -print -quit 2>/dev/null || true)"
@@ -181,6 +189,7 @@ done
   echo "LLD: $("$LLD" --version)"
   echo "LLVM: $("$LLVM_CONFIG" --version)"
   echo "Polly plugin: $POLLY_PLUGIN"
+  echo "pahole: $PAHOLE_VERSION"
   echo "Polly integration: applied"
   echo "GUD Clang/LLD LTO compatibility fix: applied"
   echo "Van Gogh 4.2 GHz patch: applied"
