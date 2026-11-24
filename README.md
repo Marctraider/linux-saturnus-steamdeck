@@ -12,8 +12,7 @@ Compiler-optimized Steam Deck kernel with Van Gogh's low-L3-cache architecture i
 ## Downstream patches and tunings
 
 - **Van Gogh 4.2 GHz CPU soft maximum:** `patches/0004-vangogh-4.2ghz.patch` raises the SMU CPU soft maximum from 3500 to 4200 MHz. This raises the firmware-requested ceiling; it does not guarantee sustained 4.2 GHz operation.
-- **AMD P-State active/EPP mode:** `CONFIG_X86_AMD_PSTATE_DEFAULT_MODE=3` explicitly selects active (EPP) mode. The preparation script validates that this setting survives `olddefconfig`.
-- **AMD P-State per-core EPP Boost:** the preparation script ports the July 28, 2026 RFC cache-ordering and per-core boost patches (2/4 and 3/4), adapts the header additions to the pinned Valve source, and enables the feature by default. Set `amd_pstate.epp_boost=0` on the kernel command line to disable it. It requires supported MSR-based CPPC hardware.
+- **AMD P-State per-core EPP Boost:** the preparation script ports the July 28, 2026 RFC cache-ordering and per-core boost patches (2/4 and 3/4), adapts the header additions to the pinned Valve source, and enables the feature by default. Set `amd_pstate.epp_boost=0` on the kernel command line to disable it. It requires AMD P-State active/EPP mode and MSR-based CPPC hardware.
 - **Clang Polly:** `0001-clang-polly.patch` adds Polly's Kconfig and Kbuild integration.
 - **GUD Full LTO compatibility:** `0003-gud-clang-lto-overflow.patch` handles the GUD fixed-size TV-mode name buffer for this Clang/LLD Full LTO build.
 - **Compiler tuning:** Clang, LLD, Polly, Full LTO, O2 and `-march=znver2`.
