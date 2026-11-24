@@ -27,7 +27,7 @@ done
 PAHOLE_VERSION="$(pahole --version | awk '{print $NF}')"
 python3 - "$PAHOLE_VERSION" <<'PY'
 import re, sys
-match = re.match(r"(\d+)\.(\d+)", sys.argv[1])
+match = re.search(r"(\d+)\.(\d+)", sys.argv[1])
 if not match or tuple(map(int, match.groups())) < (1, 25):
     raise SystemExit(f"pahole >= 1.25 is required for kernel BTF; found {sys.argv[1]}")
 PY
