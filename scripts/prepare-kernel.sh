@@ -153,18 +153,32 @@ for setting in "${required[@]}"; do
   grep -Fqx "$setting" "$OUT/.config" || { echo "Required setting did not resolve: $setting" >&2; exit 1; }
 done
 
-disabled=(KPROBES PM_DEBUG PM_SLEEP_DEBUG ACPI_DEBUG DM_DEBUG SND_DEBUG SLUB_DEBUG
-          DEBUG_RODATA_TEST DEBUG_SHIRQ SHRINKER_DEBUG IKHEADERS PAGE_POISONING
-          PROFILING SCHEDSTATS FUNCTION_ERROR_INJECTION RUNTIME_TESTING_MENU KALLSYMS_ALL)
-for symbol in "${disabled[@]}"; do
-  # Hidden Kconfig symbols can be correctly disabled yet omitted from .config.
-  # Treat both an explicit "not set" line and an absent symbol as disabled;
-  # fail only if the resolved config enables the symbol.
-  if grep -Eq "^CONFIG_${symbol}=(y|m)$" "$OUT/.config"; then
-    echo "Debug-reduction setting did not resolve as disabled: CONFIG_${symbol}" >&2
-    exit 1
-  fi
-done
+# Validate every explicit disable in the Saturnus fragment, rather than
+# maintaining a second hand-written list that can drift out of sync.
+# Kconfig omits hidden bool/tristate symbols when they resolve to n, so an
+# absent entry is valid; only an enabled y/m value is a failure.
+python3 - "$ROOT/config/saturnus.config" "$OUT/.config" <<'PY'
+import re, sys
+fragment_path, resolved_path = sys.argv[1:]
+disabled = set()
+with open(fragment_path, encoding="utf-8") as fragment:
+    for line in fragment:
+        match = re.match(r"^\\s*(?:#\\s*)?CONFIG_([A-Za-z0-9_]+)(?:=n|\\s+is not set)\\s*$", line)
+        if match:
+            disabled.add(match.group(1))
+resolved = {}
+with open(resolved_path, encoding="utf-8") as config:
+    for line in config:
+        match = re.match(r"^(CONFIG_([A-Za-z0-9_]+))=([ym])$", line)
+        if match:
+            resolved[match.group(2)] = match.group(3)
+enabled = sorted(symbol for symbol in disabled if symbol in resolved)
+if enabled:
+    for symbol in enabled:
+        print(f"Disable request did not resolve: CONFIG_{symbol}={resolved[symbol]}", file=sys.stderr)
+    raise SystemExit(1)
+print(f"Validated {len(disabled)} explicit disable requests from saturnus.config.")
+PY
 
 {
   echo "Valve package: linux-neptune-73 7.3.1.valve3-1"
