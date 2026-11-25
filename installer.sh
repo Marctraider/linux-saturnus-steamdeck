@@ -248,7 +248,7 @@ install_lavd() {
   else
     available_version="$(pacman -Si scx-scheds 2>/dev/null | awk -F ': *' '/^Version[[:space:]]*:/ {print $2; exit}')"
     [[ "$available_version" == "$LAVD_VERSION" ]] ||
-      die "SteamOS package repository does not offer the expected scx-scheds $LAVD_VERSION (found: ${available_version:-not available}). Use --skip-lavd to install the kernel without LAVD."
+      die "SteamOS package repository does not offer the expected scx-scheds $LAVD_VERSION (found: ${available_version:-not available}). "
     mkdir -p "$WORK/pacman-cache"
     LAVD_PACKAGE_ADDED=1
     pacman --cachedir "$WORK/pacman-cache" -S --needed --noconfirm scx-scheds
