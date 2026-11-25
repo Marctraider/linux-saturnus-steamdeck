@@ -18,7 +18,6 @@ LAVD_VERSION="1.1.2.linux.steamos-2.1"
 LAVD_PACKAGE_ADDED=0 LAVD_SERVICE_ENABLED_BY_US=0
 LAVD_CONFIG_CHANGED=0 LAVD_CONFIG_WAS_PRESENT=0 LAVD_BACKUP_PATH=""
 LAVD_SERVICE_WAS_ENABLED=0
-LAVD_SERVICE_WAS_ACTIVE=0
 ROOT_RO=0 ROOT_CHANGED=0 MODULES_ADDED=0 BOOT_BACKED=0
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -43,10 +42,6 @@ rollback() {
     if (( MODULES_ADDED )) && [[ -n "$RELEASE" ]]; then rm -rf -- "/usr/lib/modules/$RELEASE"; fi
     if [[ -n "$ROLLBACK" && -d "$ROLLBACK" ]]; then rm -rf -- "$ROLLBACK"; fi
     if (( LAVD_SERVICE_ENABLED_BY_US )); then systemctl disable scx.service >/dev/null 2>&1 || true; fi
-    if (( LAVD_SERVICE_DISABLED_BY_US && LAVD_SERVICE_WAS_ENABLED )); then
-      systemctl enable scx.service >/dev/null 2>&1 || true
-      if (( LAVD_SERVICE_WAS_ACTIVE )); then systemctl start scx.service >/dev/null 2>&1 || true; fi
-    fi
     if (( LAVD_CONFIG_CHANGED )); then
       if (( LAVD_CONFIG_WAS_PRESENT )) && [[ -e "$WORK/scx-default.original" ]]; then
         install -m 0644 "$WORK/scx-default.original" /etc/default/scx
@@ -232,7 +227,6 @@ install_lavd() {
   fi
 
   if systemctl is-enabled --quiet scx.service; then LAVD_SERVICE_WAS_ENABLED=1; else LAVD_SERVICE_WAS_ENABLED=0; fi
-  if systemctl is-active --quiet scx.service; then LAVD_SERVICE_WAS_ACTIVE=1; else LAVD_SERVICE_WAS_ACTIVE=0; fi
 
   local installed_version="" available_version=""
   if pacman -Q scx-scheds >/dev/null 2>&1; then
