@@ -18,12 +18,12 @@ read_config() {
   local key="$1" line
   [[ -n "$CONFIG_SOURCE" ]] || return 1
   if [[ "$CONFIG_SOURCE" == "/proc/config.gz" ]]; then
-    line="$(zcat "$CONFIG_SOURCE" 2>/dev/null | grep -m1 -E "^\${key}=|^# \${key} is not set$" || true)"
+    line="$(zcat "$CONFIG_SOURCE" 2>/dev/null | grep -m1 -E "^${key}=|^# ${key} is not set$" || true)"
   else
-    line="$(grep -m1 -E "^\${key}=|^# \${key} is not set$" "$CONFIG_SOURCE" 2>/dev/null || true)"
+    line="$(grep -m1 -E "^${key}=|^# ${key} is not set$" "$CONFIG_SOURCE" 2>/dev/null || true)"
   fi
   [[ -n "$line" ]] || return 1
-  case "$line" in "# $key is not set") printf 'n' ;; *=*) printf '%s' "\${line#*=}" ;; *) return 1 ;; esac
+  case "$line" in "# $key is not set") printf 'n' ;; *=*) printf '%s' "${line#*=}" ;; *) return 1 ;; esac
 }
 check_config() {
   local key="$1" expected="$2" label="$3" actual
@@ -76,7 +76,7 @@ EPP_BOOST=""
 for f in /sys/module/amd_pstate/parameters/epp_boost /sys/module/amd_pstate/parameters/epp_boost_enable; do
   if [[ -r "$f" ]]; then EPP_BOOST="$(cat "$f" 2>/dev/null)"; printf 'EPP boost parameter (%s): %s\n' "$f" "$EPP_BOOST"; break; fi
 done
-case "\${EPP_BOOST,,}" in
+case "${EPP_BOOST,,}" in
   y|1|yes|true) pass "AMD P-State EPP boost is enabled" ;;
   n|0|no|false) fail "AMD P-State EPP boost is disabled" ;;
   *) warn "EPP boost runtime parameter not exposed; cannot directly verify its state" ;;
@@ -107,7 +107,7 @@ if command -v systemctl >/dev/null 2>&1; then
   for unit in scx.service scx_loader.service; do
     state="$(systemctl is-active "$unit" 2>/dev/null || true)"
     enabled="$(systemctl is-enabled "$unit" 2>/dev/null || true)"
-    printf '%s: active=%s; enabled=%s\n' "$unit" "\${state:-unknown}" "\${enabled:-unknown}"
+    printf '%s: active=%s; enabled=%s\n' "$unit" "${state:-unknown}" "${enabled:-unknown}"
   done
 fi
 if command -v pgrep >/dev/null 2>&1; then
