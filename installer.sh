@@ -320,6 +320,8 @@ configure_epp_boost() {
   if [[ -w "$param" ]]; then
     printf '1\n' > "$param" || die "Could not enable AMD P-State EPP boost."
     [[ "$(cat "$param")" == "Y" || "$(cat "$param")" == "1" ]] || die "EPP boost did not report enabled after writing."
+  elif (( ! INSTALL_KERNEL )); then
+    die "The running kernel does not expose a writable amd_pstate epp_boost parameter."
   fi
   if [[ -f "$EPP_SERVICE" ]]; then
     systemctl disable linux-saturnus-epp-boost.service >/dev/null 2>&1 || true
