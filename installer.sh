@@ -237,9 +237,10 @@ parse_args() {
         cat <<'HELP'
 Usage: sudo env GH_TOKEN="$(gh auth token)" bash installer.sh
 
-The installer asks whether to replace the kernel, disable AMD P-State EPP
-boost. At the end, the installer asks whether to enable LAVD and which mode to use. LAVD userspace is installed
-automatically. Both EPP boost and LAVD are enabled by default.
+The installer asks whether to replace the kernel and disable AMD P-State EPP
+boost. At the end, it asks whether to enable LAVD (default: yes) and, if enabled,
+whether to use Performance or Autopilot mode. LAVD userspace is installed
+automatically. EPP boost and LAVD are enabled by default.
 The installer never reboots automatically.
 HELP
         exit 0
