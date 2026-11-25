@@ -14,6 +14,7 @@ WORK="" ROLLBACK="" TOKEN="" RELEASE="" RUN="" OLD_RELEASE=""
 INSTALL_KERNEL=1
 INSTALL_LAVD=1
 DISABLE_LAVD=0
+LAVD_MODE="--autopilot"
 DISABLE_EPP_BOOST=0
 EPP_SERVICE="/etc/systemd/system/linux-saturnus-epp-boost.service"
 LAVD_VERSION="1.1.2.linux.steamos-2.1"
@@ -198,10 +199,32 @@ prompt_yes_no() {
   done
 }
 
+
+prompt_lavd_options() {
+  if prompt_yes_no "Enable the LAVD scheduler?" "Y"; then
+    DISABLE_LAVD=0
+    echo
+    echo "LAVD scheduler mode"
+    echo "-------------------"
+    echo "1) Performance"
+    echo "2) Autopilot"
+    local choice=""
+    while true; do
+      read -r -p "Select mode [1-2]: " choice </dev/tty
+      case "$choice" in
+        1) LAVD_MODE="--performance"; break ;;
+        2) LAVD_MODE="--autopilot"; break ;;
+        *) echo "Please select 1 or 2." >/dev/tty ;;
+      esac
+    done
+  else
+    DISABLE_LAVD=1
+  fi
+}
+
 prompt_options() {
   if prompt_yes_no "Install the kernel and replace the current boot files?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
   if prompt_yes_no "Disable AMD P-State EPP boost?" "N"; then DISABLE_EPP_BOOST=1; else DISABLE_EPP_BOOST=0; fi
-  if prompt_yes_no "Disable the LAVD scheduler?" "N"; then DISABLE_LAVD=1; else DISABLE_LAVD=0; fi
   if (( ! INSTALL_KERNEL )); then
     echo "Kernel replacement: No."
   fi
@@ -260,26 +283,58 @@ install_lavd() {
   [[ -f /usr/lib/systemd/system/scx.service || -f /lib/systemd/system/scx.service ]] ||
     die "scx-scheds did not install the scx.service unit."
 
-  local scheduler=""
+  [[ ! -L /etc/default/scx ]] || die "/etc/default/scx is a symlink; refusing to modify it."
   if [[ -e /etc/default/scx ]]; then
-    [[ ! -L /etc/default/scx ]] || die "/etc/default/scx is a symlink; refusing to replace it."
-    scheduler="$(sed -n 's/^[[:space:]]*SCX_SCHEDULER[[:space:]]*=[[:space:]]*//p' /etc/default/scx | head -n1 | tr -d " \t\"'")"
+    cp -a /etc/default/scx "$WORK/scx-default.original"
+    LAVD_CONFIG_WAS_PRESENT=1
   fi
-  if [[ "$scheduler" != "scx_lavd" ]]; then
-    if [[ -e /etc/default/scx ]]; then
-      cp -a /etc/default/scx "$WORK/scx-default.original"
-      LAVD_CONFIG_WAS_PRESENT=1
-    fi
-    LAVD_CONFIG_CHANGED=1
-    install -d -m 0755 /etc/default
-    cat > /etc/default/scx <<'SCX'
-# Managed by linux-saturnus installer.
-# Restore the saved scx-default.pre-lavd-r<run> file to undo this selection.
-SCX_SCHEDULER=scx_lavd
-SCX_FLAGS='--autopilot --pinned-slice-us 500'
-SCX
-    chmod 0644 /etc/default/scx
-  fi
+  LAVD_CONFIG_CHANGED=1
+  install -d -m 0755 /etc/default
+
+  local lavd_help=""
+  lavd_help="$(/usr/bin/scx_lavd --help 2>&1 || true)"
+  grep -Fq -- "$LAVD_MODE" <<< "$lavd_help" || die "Installed LAVD does not support $LAVD_MODE."
+
+  python3 - /etc/default/scx "$LAVD_MODE" <<'PY'
+import pathlib
+import re
+import shlex
+import sys
+
+path = pathlib.Path(sys.argv[1])
+mode = sys.argv[2]
+text = path.read_text() if path.exists() else ""
+
+scheduler_line = re.compile(r"(?m)^[ \\t]*SCX_SCHEDULER[ \\t]*=.*$")
+flags_line = re.compile(r"(?m)^([ \\t]*SCX_FLAGS[ \\t]*=)(.*)$")
+
+if scheduler_line.search(text):
+    text = scheduler_line.sub("SCX_SCHEDULER=scx_lavd", text, count=1)
+else:
+    text = text.rstrip() + ("\\n" if text else "") + "SCX_SCHEDULER=scx_lavd\\n"
+
+match = flags_line.search(text)
+raw = match.group(2).strip() if match else ""
+if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+    raw = raw[1:-1]
+flags = shlex.split(raw)
+
+conflicting = {
+    "--autopilot", "--autopower", "--performance",
+    "--powersave", "--balanced", "--no-core-compaction",
+}
+flags = [flag for flag in flags if flag not in conflicting]
+flags.append(mode)
+
+new_line = "SCX_FLAGS=" + shlex.quote(" ".join(flags))
+if match:
+    text = text[:match.start()] + new_line + text[match.end():]
+else:
+    text = text.rstrip() + ("\\n" if text else "") + new_line + "\\n"
+
+path.write_text(text)
+PY
+  chmod 0644 /etc/default/scx
 
   systemctl daemon-reload
   if (( DISABLE_LAVD )); then
@@ -291,7 +346,7 @@ SCX
       systemctl enable scx.service
       LAVD_SERVICE_ENABLED_BY_US=1
     fi
-    echo "LAVD userspace configured (scx-scheds $installed_version); scx.service is enabled."
+    echo "LAVD userspace configured (scx-scheds $installed_version); mode: ${LAVD_MODE#--}; scx.service is enabled."
   fi
   echo "Scheduler selection takes effect on the next boot; no reboot is performed."
 }
@@ -484,8 +539,9 @@ main() {
   fi
   make_writable
   configure_epp_boost
-  install_lavd
   if (( INSTALL_KERNEL )); then install_kernel; else echo "Skipping kernel and initramfs replacement."; fi
+  prompt_lavd_options
+  install_lavd
   persist_lavd_backup
   BOOT_BACKED=0; MODULES_ADDED=0
   rm -rf -- "$WORK"; WORK=""
