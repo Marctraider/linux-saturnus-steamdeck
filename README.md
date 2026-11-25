@@ -2,7 +2,7 @@
 
 Compiler-optimized Steam Deck kernel based on Valve's SteamOS kernel and configuration, with the Van Gogh APU in mind.
 
-The installer offers an AMD P-State EPP boost choice during setup. At the end, it asks whether to enable LAVD (default: yes); when enabled, you can select Performance or Autopilot mode. LAVD userspace is installed automatically. The installer does not reboot automatically.
+The installer offers an AMD P-State EPP boost choice during setup. At the end, it asks whether to enable LAVD (default: yes); when enabled, you can select Performance or Autopilot mode. The selected mode is written to the LAVD configuration and takes effect on the next boot. LAVD userspace is installed automatically. The installer does not reboot automatically.
 
 ## Install
 
