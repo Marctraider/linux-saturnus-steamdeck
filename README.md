@@ -2,7 +2,7 @@
 
 Compiler-optimized Steam Deck kernel based on Valve's SteamOS kernel and configuration, with the Van Gogh APU in mind.
 
-LAVD scheduler is the only optional userspace addition.
+LAVD userspace is installed automatically. The installer keeps AMD P-State EPP boost and the LAVD scheduler enabled by default, and offers separate prompts to disable either.
 
 ## Install
 
