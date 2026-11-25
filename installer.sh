@@ -12,17 +12,13 @@ POSTBOOT="/usr/local/sbin/linux-saturnus-postboot"
 UNIT="/etc/systemd/system/linux-saturnus-postboot.service"
 WORK="" ROLLBACK="" TOKEN="" RELEASE="" RUN="" OLD_RELEASE=""
 INSTALL_KERNEL=1
-INSTALL_LAVD=1
-DISABLE_LAVD=0
 LAVD_MODE="--autopilot"
-DISABLE_EPP_BOOST=0
 EPP_SERVICE="/etc/systemd/system/linux-saturnus-epp-boost.service"
 LAVD_VERSION="1.1.2.linux.steamos-2.1"
 LAVD_PACKAGE_ADDED=0 LAVD_SERVICE_ENABLED_BY_US=0
 LAVD_CONFIG_CHANGED=0 LAVD_CONFIG_WAS_PRESENT=0 LAVD_BACKUP_PATH=""
 LAVD_SERVICE_WAS_ENABLED=0
-EPP_SERVICE_CREATED=0 EPP_PREVIOUS_VALUE=""
-LAVD_SERVICE_DISABLED_BY_US=0 LAVD_SERVICE_WAS_ACTIVE=0
+LAVD_SERVICE_WAS_ACTIVE=0
 ROOT_RO=0 ROOT_CHANGED=0 MODULES_ADDED=0 BOOT_BACKED=0
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -51,8 +47,6 @@ rollback() {
       systemctl enable scx.service >/dev/null 2>&1 || true
       if (( LAVD_SERVICE_WAS_ACTIVE )); then systemctl start scx.service >/dev/null 2>&1 || true; fi
     fi
-    if (( EPP_SERVICE_CREATED )); then systemctl disable linux-saturnus-epp-boost.service >/dev/null 2>&1 || true; rm -f "$EPP_SERVICE"; systemctl daemon-reload >/dev/null 2>&1 || true; fi
-    if [[ -n "$EPP_PREVIOUS_VALUE" && -w /sys/module/amd_pstate/parameters/epp_boost ]]; then printf "%s\n" "$EPP_PREVIOUS_VALUE" > /sys/module/amd_pstate/parameters/epp_boost || true; fi
     if (( LAVD_CONFIG_CHANGED )); then
       if (( LAVD_CONFIG_WAS_PRESENT )) && [[ -e "$WORK/scx-default.original" ]]; then
         install -m 0644 "$WORK/scx-default.original" /etc/default/scx
@@ -200,31 +194,8 @@ prompt_yes_no() {
 }
 
 
-prompt_lavd_options() {
-  if prompt_yes_no "Enable the LAVD scheduler?" "Y"; then
-    DISABLE_LAVD=0
-    echo
-    echo "LAVD scheduler mode"
-    echo "-------------------"
-    echo "1) Performance"
-    echo "2) Autopilot"
-    local choice=""
-    while true; do
-      read -r -p "Select mode [1-2]: " choice </dev/tty
-      case "$choice" in
-        1) LAVD_MODE="--performance"; break ;;
-        2) LAVD_MODE="--autopilot"; break ;;
-        *) echo "Please select 1 or 2." >/dev/tty ;;
-      esac
-    done
-  else
-    DISABLE_LAVD=1
-  fi
-}
-
 prompt_options() {
   if prompt_yes_no "Install the kernel and replace the current boot files?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
-  if prompt_yes_no "Disable AMD P-State EPP boost?" "N"; then DISABLE_EPP_BOOST=1; else DISABLE_EPP_BOOST=0; fi
   if (( ! INSTALL_KERNEL )); then
     echo "Kernel replacement: No."
   fi
@@ -237,11 +208,9 @@ parse_args() {
         cat <<'HELP'
 Usage: sudo env GH_TOKEN="$(gh auth token)" bash installer.sh
 
-The installer asks whether to replace the kernel and disable AMD P-State EPP
-boost. At the end, it asks whether to enable LAVD (default: yes) and, if enabled,
-whether to use Performance or Autopilot mode. LAVD userspace is installed
-automatically. EPP boost and LAVD are enabled by default.
-The installer never reboots automatically.
+The installer asks whether to replace the kernel. AMD P-State EPP boost is
+enabled automatically, and LAVD userspace with Autopilot mode is installed and
+enabled automatically. The installer never reboots automatically.
 HELP
         exit 0
         ;;
@@ -338,60 +307,26 @@ PY
   chmod 0644 /etc/default/scx
 
   systemctl daemon-reload
-  if (( DISABLE_LAVD )); then
-    if (( LAVD_SERVICE_WAS_ENABLED || LAVD_SERVICE_WAS_ACTIVE )); then LAVD_SERVICE_DISABLED_BY_US=1; fi
-    systemctl disable --now scx.service >/dev/null 2>&1 || true
-    echo "LAVD userspace installed (scx-scheds $installed_version); scheduler disabled."
-  else
-    if (( ! LAVD_SERVICE_WAS_ENABLED )); then
-      systemctl enable scx.service
-      LAVD_SERVICE_ENABLED_BY_US=1
-    fi
-    echo "LAVD userspace configured (scx-scheds $installed_version); mode: ${LAVD_MODE#--}; scx.service is enabled."
+  if (( ! LAVD_SERVICE_WAS_ENABLED )); then
+    systemctl enable scx.service
+    LAVD_SERVICE_ENABLED_BY_US=1
   fi
+  echo "LAVD userspace configured (scx-scheds $installed_version); mode: ${LAVD_MODE#--}; scx.service is enabled."
   echo "Scheduler selection takes effect on the next boot; no reboot is performed."
 }
 
 configure_epp_boost() {
   local param="/sys/module/amd_pstate/parameters/epp_boost"
-  if (( DISABLE_EPP_BOOST )); then
-    if [[ -r "$param" ]]; then EPP_PREVIOUS_VALUE="$(cat "$param")"; fi
-    if [[ -w "$param" ]]; then
-      printf '0\n' > "$param" || die "Could not disable AMD P-State EPP boost."
-      [[ "$(cat "$param")" == "N" || "$(cat "$param")" == "0" ]] || die "EPP boost did not report disabled after writing."
-    elif (( ! INSTALL_KERNEL )); then
-      die "The running kernel does not expose a writable amd_pstate epp_boost parameter."
-    fi
-    cat > "$WORK/epp-boost-disable.service" <<'UNIT'
-[Unit]
-Description=Disable AMD P-State EPP boost for Saturnus
-After=systemd-modules-load.service
-Before=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/sh -c 'test -w /sys/module/amd_pstate/parameters/epp_boost && printf 0 > /sys/module/amd_pstate/parameters/epp_boost'
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-    install -m 0644 "$WORK/epp-boost-disable.service" "$EPP_SERVICE"
-    EPP_SERVICE_CREATED=1
-    systemctl daemon-reload
-    systemctl enable linux-saturnus-epp-boost.service
-    echo "AMD P-State EPP boost disabled now and persistently across boots."
-  else
-    if [[ -w "$param" ]]; then
-      printf '1\n' > "$param" || die "Could not enable AMD P-State EPP boost."
-    fi
-    if [[ -f "$EPP_SERVICE" ]]; then
-      systemctl disable linux-saturnus-epp-boost.service >/dev/null 2>&1 || true
-      rm -f "$EPP_SERVICE"
-      systemctl daemon-reload
-    fi
-    echo "AMD P-State EPP boost remains enabled (default)."
+  if [[ -w "$param" ]]; then
+    printf '1\n' > "$param" || die "Could not enable AMD P-State EPP boost."
+    [[ "$(cat "$param")" == "Y" || "$(cat "$param")" == "1" ]] || die "EPP boost did not report enabled after writing."
   fi
+  if [[ -f "$EPP_SERVICE" ]]; then
+    systemctl disable linux-saturnus-epp-boost.service >/dev/null 2>&1 || true
+    rm -f "$EPP_SERVICE"
+    systemctl daemon-reload
+  fi
+  echo "AMD P-State EPP boost enabled (default)."
 }
 
 persist_lavd_backup() {
@@ -431,7 +366,7 @@ check_platform() {
     free_kb="$(df -Pk "$WORK" | awk 'NR==2 {print $4}')"
     (( free_kb > 1048576 )) || die "Less than 1 GiB free on staging filesystem."
     for c in curl python3 tar zstd sha256sum depmod mkinitcpio; do need "$c"; done
-  elif (( INSTALL_LAVD )); then
+  else
     free_kb="$(df -Pk "$WORK" | awk 'NR==2 {print $4}')"
     (( free_kb > 65536 )) || die "Less than 64 MiB free for optional userspace package staging."
   fi
@@ -541,7 +476,6 @@ main() {
   make_writable
   configure_epp_boost
   if (( INSTALL_KERNEL )); then install_kernel; else echo "Skipping kernel and initramfs replacement."; fi
-  prompt_lavd_options
   install_lavd
   persist_lavd_backup
   BOOT_BACKED=0; MODULES_ADDED=0
