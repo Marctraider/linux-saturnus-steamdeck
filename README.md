@@ -26,3 +26,15 @@ After installing the kernel and rebooting into it, run the status checker from t
 ```
 
 The status checker is read-only. It reports the running kernel and relevant configuration/runtime details; it does not change system settings or reboot the Deck. The installer does not reboot automatically.
+
+## Benchmark results
+
+Stock kernel baseline (2 samples):
+
+| Metric | Stock kernel | New kernel (all features enabled) | Change |
+|---|---:|---:|---:|
+| Average | 65.66 | 68.36 | +4.11% |
+| Minimum | 45.14 | 47.56 | +5.36% |
+| Maximum | 90.10 | 90.91 | +0.90% |
+
+The new-kernel figures are compared against the stock-kernel baseline. Percentage changes are calculated relative to the stock values.
