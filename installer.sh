@@ -238,7 +238,7 @@ parse_args() {
 Usage: sudo env GH_TOKEN="$(gh auth token)" bash installer.sh
 
 The installer asks whether to replace the kernel, disable AMD P-State EPP
-boost, and disable the LAVD scheduler. LAVD userspace is installed
+boost. At the end, the installer asks whether to enable LAVD and which mode to use. LAVD userspace is installed
 automatically. Both EPP boost and LAVD are enabled by default.
 The installer never reboots automatically.
 HELP
@@ -305,13 +305,13 @@ path = pathlib.Path(sys.argv[1])
 mode = sys.argv[2]
 text = path.read_text() if path.exists() else ""
 
-scheduler_line = re.compile(r"(?m)^[ \\t]*SCX_SCHEDULER[ \\t]*=.*$")
-flags_line = re.compile(r"(?m)^([ \\t]*SCX_FLAGS[ \\t]*=)(.*)$")
+scheduler_line = re.compile(r"(?m)^[ \t]*SCX_SCHEDULER[ \t]*=.*$")
+flags_line = re.compile(r"(?m)^([ \t]*SCX_FLAGS[ \t]*=)(.*)$")
 
 if scheduler_line.search(text):
     text = scheduler_line.sub("SCX_SCHEDULER=scx_lavd", text, count=1)
 else:
-    text = text.rstrip() + ("\\n" if text else "") + "SCX_SCHEDULER=scx_lavd\\n"
+    text = text.rstrip() + ("\n" if text else "") + "SCX_SCHEDULER=scx_lavd\n"
 
 match = flags_line.search(text)
 raw = match.group(2).strip() if match else ""
@@ -330,7 +330,7 @@ new_line = "SCX_FLAGS=" + shlex.quote(" ".join(flags))
 if match:
     text = text[:match.start()] + new_line + text[match.end():]
 else:
-    text = text.rstrip() + ("\\n" if text else "") + new_line + "\\n"
+    text = text.rstrip() + ("\n" if text else "") + new_line + "\n"
 
 path.write_text(text)
 PY
