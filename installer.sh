@@ -12,16 +12,15 @@ POSTBOOT="/usr/local/sbin/linux-saturnus-postboot"
 UNIT="/etc/systemd/system/linux-saturnus-postboot.service"
 WORK="" ROLLBACK="" TOKEN="" RELEASE="" RUN="" OLD_RELEASE=""
 INSTALL_KERNEL=1
-INSTALL_LAVD=0
-DISABLE_BOOT_LOGO=0
-SKIP_LAVD_REQUESTED=0
-GRUB_DEFAULTS="/etc/default/grub"
-GRUB_CONFIG="/efi/EFI/steamos/grub.cfg"
-GRUB_DEFAULT_CHANGED=0 GRUB_CONFIG_CHANGED=0
+INSTALL_LAVD=1
+DISABLE_LAVD=0
+DISABLE_EPP_BOOST=0
+EPP_SERVICE="/etc/systemd/system/linux-saturnus-epp-boost.service"
 LAVD_VERSION="1.1.2.linux.steamos-2.1"
 LAVD_PACKAGE_ADDED=0 LAVD_SERVICE_ENABLED_BY_US=0
 LAVD_CONFIG_CHANGED=0 LAVD_CONFIG_WAS_PRESENT=0 LAVD_BACKUP_PATH=""
 LAVD_SERVICE_WAS_ENABLED=0
+EPP_SERVICE_CREATED=0 EPP_PREVIOUS_VALUE=""
 ROOT_RO=0 ROOT_CHANGED=0 MODULES_ADDED=0 BOOT_BACKED=0
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -37,12 +36,6 @@ restore_root() {
 rollback() {
   local rc=$?
   if (( rc != 0 )); then
-    if (( GRUB_DEFAULT_CHANGED )); then
-      [[ ! -f "$WORK/grub-default.original" ]] || cp -a "$WORK/grub-default.original" "$GRUB_DEFAULTS"
-    fi
-    if (( GRUB_CONFIG_CHANGED )); then
-      [[ ! -f "$WORK/grub-config.original" ]] || cp -a "$WORK/grub-config.original" "$GRUB_CONFIG"
-    fi
     if (( BOOT_BACKED )); then
       [[ ! -f "$ROLLBACK/old-kernel" ]] || install -m 0644 "$ROLLBACK/old-kernel" "$BOOT_KERNEL"
       [[ ! -f "$ROLLBACK/old-initramfs" ]] || install -m 0644 "$ROLLBACK/old-initramfs" "$BOOT_INITRAMFS"
@@ -52,6 +45,8 @@ rollback() {
     if (( MODULES_ADDED )) && [[ -n "$RELEASE" ]]; then rm -rf -- "/usr/lib/modules/$RELEASE"; fi
     if [[ -n "$ROLLBACK" && -d "$ROLLBACK" ]]; then rm -rf -- "$ROLLBACK"; fi
     if (( LAVD_SERVICE_ENABLED_BY_US )); then systemctl disable scx.service >/dev/null 2>&1 || true; fi
+    if (( EPP_SERVICE_CREATED )); then systemctl disable linux-saturnus-epp-boost.service >/dev/null 2>&1 || true; rm -f "$EPP_SERVICE"; systemctl daemon-reload >/dev/null 2>&1 || true; fi
+    if [[ -n "$EPP_PREVIOUS_VALUE" && -w /sys/module/amd_pstate/parameters/epp_boost ]]; then printf "%s\n" "$EPP_PREVIOUS_VALUE" > /sys/module/amd_pstate/parameters/epp_boost || true; fi
     if (( LAVD_CONFIG_CHANGED )); then
       if (( LAVD_CONFIG_WAS_PRESENT )) && [[ -e "$WORK/scx-default.original" ]]; then
         install -m 0644 "$WORK/scx-default.original" /etc/default/scx
@@ -200,32 +195,24 @@ prompt_yes_no() {
 
 prompt_options() {
   if prompt_yes_no "Install the kernel and replace the current boot files?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
-  if (( SKIP_LAVD_REQUESTED )); then
-    INSTALL_LAVD=0
-    echo "Optional userspace additions: No (--skip-lavd)."
-  elif prompt_yes_no "Install optional userspace additions (scx-scheds/LAVD)?" "N"; then
-    INSTALL_LAVD=1
-  else
-    INSTALL_LAVD=0
-  fi
-  if prompt_yes_no "Disable the SteamOS boot logo and show boot messages?" "N"; then DISABLE_BOOT_LOGO=1; else DISABLE_BOOT_LOGO=0; fi
-  if (( ! INSTALL_KERNEL && ! INSTALL_LAVD && ! DISABLE_BOOT_LOGO )); then
-    echo "All options declined; nothing to do."
-    exit 0
+  if prompt_yes_no "Disable AMD P-State EPP boost?" "N"; then DISABLE_EPP_BOOST=1; else DISABLE_EPP_BOOST=0; fi
+  if prompt_yes_no "Disable the LAVD scheduler?" "N"; then DISABLE_LAVD=1; else DISABLE_LAVD=0; fi
+  if (( ! INSTALL_KERNEL )); then
+    echo "Kernel replacement: No."
   fi
 }
 
 parse_args() {
   while (($#)); do
     case "$1" in
-      --skip-lavd) SKIP_LAVD_REQUESTED=1 ;;
       -h|--help)
         cat <<'HELP'
-Usage: sudo env GH_TOKEN="$(gh auth token)" bash installer.sh [--skip-lavd]
+Usage: sudo env GH_TOKEN="$(gh auth token)" bash installer.sh
 
-The installer asks whether to install the kernel, install optional LAVD
-userspace, and disable the SteamOS boot splash. --skip-lavd preselects No
-for the userspace prompt. The installer never reboots automatically.
+The installer asks whether to replace the kernel, disable AMD P-State EPP
+boost, and disable the LAVD scheduler. LAVD userspace is installed
+automatically. Both EPP boost and LAVD are enabled by default.
+The installer never reboots automatically.
 HELP
         exit 0
         ;;
@@ -235,69 +222,7 @@ HELP
   done
 }
 
-disable_boot_logo() {
-  (( DISABLE_BOOT_LOGO )) || return 0
-  [[ -f "$GRUB_DEFAULTS" ]] || die "$GRUB_DEFAULTS is missing; cannot safely disable the boot logo."
-  [[ -f "$GRUB_CONFIG" ]] || die "$GRUB_CONFIG is missing; refusing to regenerate an unknown boot configuration."
-  need update-grub
-
-  cp -a "$GRUB_DEFAULTS" "$WORK/grub-default.original"
-  cp -a "$GRUB_CONFIG" "$WORK/grub-config.original"
-  GRUB_DEFAULT_CHANGED=1
-  GRUB_CONFIG_CHANGED=1
-
-  python3 - "$GRUB_DEFAULTS" <<'PY'
-import pathlib,re,sys
-p=pathlib.Path(sys.argv[1])
-lines=p.read_text().splitlines(keepends=True)
-found=0
-out=[]
-for line in lines:
-    if re.match(r'^\s*GRUB_CMDLINE_LINUX_DEFAULT\s*=', line):
-        m=re.fullmatch(r'(\s*GRUB_CMDLINE_LINUX_DEFAULT\s*=\s*)(["\'])(.*?)\2(\s*(?:#.*)?\n?)', line)
-        if not m:
-            raise SystemExit("Cannot safely parse GRUB_CMDLINE_LINUX_DEFAULT; leaving it unchanged.")
-        tokens=m.group(3).split()
-        tokens=[t for t in tokens if t not in ("quiet","splash") and not t.startswith("loglevel=")]
-        tokens.insert(0,"loglevel=7")
-        out.append(m.group(1)+m.group(2)+" ".join(tokens)+m.group(2)+m.group(4))
-        found+=1
-    else:
-        out.append(line)
-if found != 1:
-    raise SystemExit("Expected exactly one GRUB_CMDLINE_LINUX_DEFAULT assignment.")
-p.write_text("".join(out))
-PY
-  update-grub
-
-  python3 - "$GRUB_CONFIG" <<'PY'
-import pathlib,sys
-p=pathlib.Path(sys.argv[1])
-if not p.is_file(): raise SystemExit("GRUB update did not produce the expected active config.")
-s=p.read_text(errors="replace")
-boot=[line for line in s.splitlines() if "steamenv_boot" in line and "linux" in line]
-if not any("/boot/vmlinuz-linux-neptune-73" in line for line in boot):
-    raise SystemExit("Generated GRUB config no longer contains the existing SteamOS kernel path.")
-if "/boot/initramfs-linux-neptune-73.img" not in s or "/boot/amd-ucode.img" not in s:
-    raise SystemExit("Generated GRUB config no longer contains the existing SteamOS initramfs paths.")
-if any(any(token in line.split() for token in ("quiet","splash")) for line in boot):
-    raise SystemExit("Generated GRUB kernel command line still contains quiet or splash.")
-if not any("loglevel=7" in line.split() for line in boot):
-    raise SystemExit("Generated GRUB kernel command line is not verbose.")
-PY
-  echo "SteamOS boot splash disabled; quiet/splash removed and loglevel raised to 7."
-}
-
-persist_boot_logo_backup() {
-  (( GRUB_DEFAULT_CHANGED )) || return 0
-  install -d -m 0755 "$STATE"
-  [[ -e "$STATE/grub-default.pre-logo-disable" ]] || install -m 0600 "$WORK/grub-default.original" "$STATE/grub-default.pre-logo-disable"
-  [[ -e "$STATE/grub.cfg.pre-logo-disable" ]] || install -m 0600 "$WORK/grub-config.original" "$STATE/grub.cfg.pre-logo-disable"
-  echo "Original GRUB defaults and active config backed up under $STATE for manual restoration."
-}
-
 install_lavd() {
-  (( INSTALL_LAVD )) || { echo "Skipping optional LAVD userspace installation."; return 0; }
   if (( ! INSTALL_KERNEL )) && [[ ! -d /sys/kernel/sched_ext ]]; then
     die "The running kernel does not expose sched_ext; install the Saturnus kernel or decline LAVD userspace."
   fi
@@ -355,12 +280,59 @@ SCX
   fi
 
   systemctl daemon-reload
-  if (( ! LAVD_SERVICE_WAS_ENABLED )); then
-    systemctl enable scx.service
-    LAVD_SERVICE_ENABLED_BY_US=1
+  if (( DISABLE_LAVD )); then
+    systemctl disable --now scx.service >/dev/null 2>&1 || true
+    echo "LAVD userspace installed (scx-scheds $installed_version); scheduler disabled."
+  else
+    if (( ! LAVD_SERVICE_WAS_ENABLED )); then
+      systemctl enable scx.service
+      LAVD_SERVICE_ENABLED_BY_US=1
+    fi
+    echo "LAVD userspace configured (scx-scheds $installed_version); scx.service is enabled."
   fi
-  echo "LAVD userspace configured (scx-scheds $installed_version); scx.service is enabled for the next boot."
-  echo "The scheduler is not started in this session and no reboot is performed."
+  echo "Scheduler selection takes effect on the next boot; no reboot is performed."
+}
+
+configure_epp_boost() {
+  local param="/sys/module/amd_pstate/parameters/epp_boost"
+  if (( DISABLE_EPP_BOOST )); then
+    if [[ -r "$param" ]]; then EPP_PREVIOUS_VALUE="$(cat "$param")"; fi
+    if [[ -w "$param" ]]; then
+      printf '0\n' > "$param" || die "Could not disable AMD P-State EPP boost."
+      [[ "$(cat "$param")" == "N" || "$(cat "$param")" == "0" ]] || die "EPP boost did not report disabled after writing."
+    elif (( ! INSTALL_KERNEL )); then
+      die "The running kernel does not expose a writable amd_pstate epp_boost parameter."
+    fi
+    cat > "$WORK/epp-boost-disable.service" <<'UNIT'
+[Unit]
+Description=Disable AMD P-State EPP boost for Saturnus
+After=systemd-modules-load.service
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/sh -c 'test -w /sys/module/amd_pstate/parameters/epp_boost && printf 0 > /sys/module/amd_pstate/parameters/epp_boost'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    install -m 0644 "$WORK/epp-boost-disable.service" "$EPP_SERVICE"
+    EPP_SERVICE_CREATED=1
+    systemctl daemon-reload
+    systemctl enable linux-saturnus-epp-boost.service
+    echo "AMD P-State EPP boost disabled now and persistently across boots."
+  else
+    if [[ -w "$param" ]]; then
+      printf '1\n' > "$param" || die "Could not enable AMD P-State EPP boost."
+    fi
+    if [[ -f "$EPP_SERVICE" ]]; then
+      systemctl disable linux-saturnus-epp-boost.service >/dev/null 2>&1 || true
+      rm -f "$EPP_SERVICE"
+      systemctl daemon-reload
+    fi
+    echo "AMD P-State EPP boost remains enabled (default)."
+  fi
 }
 
 persist_lavd_backup() {
@@ -405,9 +377,8 @@ check_platform() {
     (( free_kb > 65536 )) || die "Less than 64 MiB free for optional userspace package staging."
   fi
   for c in steamos-readonly findmnt mountpoint install; do need "$c"; done
-  if (( INSTALL_KERNEL || INSTALL_LAVD )); then need systemctl; fi
-  if (( INSTALL_LAVD )); then need pacman; fi
-  if (( DISABLE_BOOT_LOGO )); then need python3; need update-grub; fi
+  need systemctl
+  need pacman
 }
 
 make_writable() {
@@ -513,11 +484,10 @@ main() {
     extract_payload
   fi
   make_writable
-  disable_boot_logo
+  configure_epp_boost
   install_lavd
   if (( INSTALL_KERNEL )); then install_kernel; else echo "Skipping kernel and initramfs replacement."; fi
   persist_lavd_backup
-  persist_boot_logo_backup
   BOOT_BACKED=0; MODULES_ADDED=0
   rm -rf -- "$WORK"; WORK=""
   restore_root
