@@ -65,6 +65,7 @@ rollback() {
       fi
     fi
     if (( LAVD_CONFIG_CHANGED && LAVD_SERVICE_WAS_ACTIVE )); then systemctl restart scx.service >/dev/null 2>&1 || true; fi
+    if (( LAVD_SERVICE_ENABLED_BY_US && LAVD_SERVICE_WAS_ACTIVE )); then systemctl start scx.service >/dev/null 2>&1 || true; fi
     if (( LAVD_PACKAGE_ADDED )); then pacman -Rns --noconfirm scx-scheds >/dev/null 2>&1 || true; fi
     [[ -z "$LAVD_BACKUP_PATH" ]] || rm -f "$LAVD_BACKUP_PATH"
     rm -f "$STATE/pending-release" "$STATE/previous-release" "$STATE/rollback-dir" "$POSTBOOT" "$UNIT"
@@ -337,6 +338,7 @@ PY
 
 configure_epp_boost() {
   local param="/sys/module/amd_pstate/parameters/epp_boost"
+  need python3
   local value expected
   if (( EPP_BOOST )); then value=1; expected="Y 1"; else value=0; expected="N 0"; fi
 
