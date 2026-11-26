@@ -12,8 +12,13 @@ POSTBOOT="/usr/local/sbin/linux-saturnus-postboot"
 UNIT="/etc/systemd/system/linux-saturnus-postboot.service"
 WORK="" ROLLBACK="" TOKEN="" RELEASE="" RUN="" OLD_RELEASE=""
 INSTALL_KERNEL=1
+EPP_BOOST=1
+LAVD_ENABLED=1
 LAVD_MODE="--autopilot"
 EPP_SERVICE="/etc/systemd/system/linux-saturnus-epp-boost.service"
+GRUB_CONFIG_CHANGED=0 GRUB_DEFAULT_WAS_PRESENT=0
+LAVD_SERVICE_STARTED_BY_US=0 LAVD_DISABLE_APPLIED=0
+LAVD_SERVICE_WAS_ACTIVE=0
 LAVD_VERSION="1.1.2.linux.steamos-2.1"
 LAVD_PACKAGE_ADDED=0 LAVD_SERVICE_ENABLED_BY_US=0
 LAVD_CONFIG_CHANGED=0 LAVD_CONFIG_WAS_PRESENT=0 LAVD_BACKUP_PATH=""
@@ -41,7 +46,17 @@ rollback() {
     rm -f "$BOOT_KERNEL.new" "$BOOT_INITRAMFS.new"
     if (( MODULES_ADDED )) && [[ -n "$RELEASE" ]]; then rm -rf -- "/usr/lib/modules/$RELEASE"; fi
     if [[ -n "$ROLLBACK" && -d "$ROLLBACK" ]]; then rm -rf -- "$ROLLBACK"; fi
+    if (( LAVD_SERVICE_STARTED_BY_US )); then systemctl stop scx.service >/dev/null 2>&1 || true; fi
     if (( LAVD_SERVICE_ENABLED_BY_US )); then systemctl disable scx.service >/dev/null 2>&1 || true; fi
+    if (( LAVD_DISABLE_APPLIED )); then
+      if (( LAVD_SERVICE_WAS_ENABLED )); then systemctl enable scx.service >/dev/null 2>&1 || true; fi
+      if (( LAVD_SERVICE_WAS_ACTIVE )); then systemctl start scx.service >/dev/null 2>&1 || true; fi
+    fi
+    if (( GRUB_CONFIG_CHANGED )); then
+      if (( GRUB_DEFAULT_WAS_PRESENT )); then cp -a "$WORK/grub-default.original" /etc/default/grub
+      else rm -f /etc/default/grub; fi
+      cp -a "$WORK/grub-efi.original" /efi/EFI/steamos/grub.cfg
+    fi
     if (( LAVD_CONFIG_CHANGED )); then
       if (( LAVD_CONFIG_WAS_PRESENT )) && [[ -e "$WORK/scx-default.original" ]]; then
         install -m 0644 "$WORK/scx-default.original" /etc/default/scx
@@ -191,9 +206,9 @@ prompt_yes_no() {
 
 prompt_options() {
   if prompt_yes_no "Install the kernel and replace the current boot files?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
-  if (( ! INSTALL_KERNEL )); then
-    echo "Kernel replacement: No."
-  fi
+  if (( ! INSTALL_KERNEL )); then echo "Kernel replacement: No."; fi
+  if prompt_yes_no "Enable AMD P-State EPP boost?" "Y"; then EPP_BOOST=1; else EPP_BOOST=0; fi
+  if prompt_yes_no "Enable LAVD scheduler (Autopilot mode)?" "Y"; then LAVD_ENABLED=1; else LAVD_ENABLED=0; fi
 }
 
 parse_args() {
@@ -203,9 +218,12 @@ parse_args() {
         cat <<'HELP'
 Usage: sudo env GH_TOKEN="$(gh auth token)" bash installer.sh
 
-The installer asks whether to replace the kernel. AMD P-State EPP boost is
-enabled automatically, and LAVD userspace with Autopilot mode is installed and
-enabled automatically. The installer never reboots automatically.
+The installer asks whether to replace the kernel, enable AMD P-State EPP boost,
+and enable the LAVD scheduler in Autopilot mode. EPP boost is applied at runtime
+and added to the GRUB kernel command line for persistence. LAVD is enabled or
+disabled through its systemd service; it takes effect immediately when the
+running kernel supports sched_ext, otherwise after booting the new kernel.
+The installer never reboots automatically.
 HELP
         exit 0
         ;;
@@ -227,6 +245,7 @@ install_lavd() {
   fi
 
   if systemctl is-enabled --quiet scx.service; then LAVD_SERVICE_WAS_ENABLED=1; else LAVD_SERVICE_WAS_ENABLED=0; fi
+  if systemctl is-active --quiet scx.service; then LAVD_SERVICE_WAS_ACTIVE=1; else LAVD_SERVICE_WAS_ACTIVE=0; fi
 
   local installed_version="" available_version=""
   if pacman -Q scx-scheds >/dev/null 2>&1; then
@@ -305,24 +324,99 @@ PY
     systemctl enable scx.service
     LAVD_SERVICE_ENABLED_BY_US=1
   fi
-  echo "LAVD userspace configured (scx-scheds $installed_version); mode: ${LAVD_MODE#--}; scx.service is enabled."
-  echo "Scheduler selection takes effect on the next boot; no reboot is performed."
+  if [[ -d /sys/kernel/sched_ext ]]; then
+    systemctl restart scx.service || die "Could not start/restart LAVD on the running kernel."
+    if (( ! LAVD_SERVICE_WAS_ACTIVE )); then LAVD_SERVICE_STARTED_BY_US=1; fi
+    echo "LAVD userspace configured (scx-scheds $installed_version); mode: ${LAVD_MODE#--}; scx.service enabled and running now."
+  else
+    echo "LAVD userspace configured (scx-scheds $installed_version); mode: ${LAVD_MODE#--}; service enabled for the next boot."
+    echo "The running kernel does not expose sched_ext, so LAVD cannot be activated until the Saturnus kernel is booted."
+  fi
 }
 
 configure_epp_boost() {
   local param="/sys/module/amd_pstate/parameters/epp_boost"
+  local value expected
+  if (( EPP_BOOST )); then value=1; expected="Y 1"; else value=0; expected="N 0"; fi
+
+  # Persist the choice in SteamOS GRUB and its source configuration.
+  [[ ! -L /etc/default/grub ]] || die "/etc/default/grub is a symlink; refusing to modify it."
+  [[ -f /efi/EFI/steamos/grub.cfg ]] || die "SteamOS GRUB configuration is missing."
+  if [[ -f /etc/default/grub ]]; then
+    cp -a /etc/default/grub "$WORK/grub-default.original"
+    GRUB_DEFAULT_WAS_PRESENT=1
+  fi
+  cp -a /efi/EFI/steamos/grub.cfg "$WORK/grub-efi.original"
+  GRUB_CONFIG_CHANGED=1
+  python3 - /etc/default/grub "$value" <<'PY'
+import pathlib, re, shlex, sys
+path = pathlib.Path(sys.argv[1])
+value = sys.argv[2]
+text = path.read_text() if path.exists() else ""
+param = "amd_pstate.epp_boost="
+lines = text.splitlines()
+seen_default = False
+out = []
+for line in lines:
+    m = re.match(r"^(\s*GRUB_CMDLINE_LINUX(?:_DEFAULT)?\s*=)(.*)$", line)
+    if not m:
+        out.append(line)
+        continue
+    key, raw = m.group(1), m.group(2).strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+        raw = raw[1:-1]
+    args = shlex.split(raw)
+    args = [a for a in args if not a.startswith(param)]
+    if key.rstrip().endswith("GRUB_CMDLINE_LINUX_DEFAULT"):
+        seen_default = True
+        if value == "1":
+            args.append(param + "1")
+    out.append(key + shlex.quote(" ".join(args)))
+if not seen_default and value == "1":
+    out.append("GRUB_CMDLINE_LINUX_DEFAULT=" + shlex.quote(param + "1"))
+path.write_text("\n".join(out).rstrip() + "\n")
+PY
+  need update-grub
+  update-grub || die "Could not regenerate SteamOS GRUB configuration."
+  if (( EPP_BOOST )); then
+    grep -Fq "amd_pstate.epp_boost=1" /efi/EFI/steamos/grub.cfg || die "EPP boost kernel parameter is missing from regenerated GRUB configuration."
+  else
+    if grep -Fq "amd_pstate.epp_boost=" /efi/EFI/steamos/grub.cfg; then
+      die "EPP boost kernel parameter remains in regenerated GRUB configuration after disabling."
+    fi
+  fi
+
   if [[ -w "$param" ]]; then
-    printf '1\n' > "$param" || die "Could not enable AMD P-State EPP boost."
-    [[ "$(cat "$param")" == "Y" || "$(cat "$param")" == "1" ]] || die "EPP boost did not report enabled after writing."
-  elif (( ! INSTALL_KERNEL )); then
+    printf '%s\n' "$value" > "$param" || die "Could not set AMD P-State EPP boost at runtime."
+    local actual
+    actual="$(cat "$param")"
+    case " $expected " in *" $actual "*) ;; *) die "EPP boost runtime value verification failed (read: $actual).";; esac
+    if (( EPP_BOOST )); then
+      echo "AMD P-State EPP boost enabled: runtime value set; amd_pstate.epp_boost=1 added to GRUB for persistence on boot."
+    else
+      echo "AMD P-State EPP boost disabled: runtime value set to 0; amd_pstate.epp_boost removed from GRUB boot options."
+    fi
+  elif (( INSTALL_KERNEL )); then
+    echo "AMD P-State EPP boost selection saved to GRUB; the running kernel has no writable parameter, so the runtime change will take effect after reboot."
+  else
     die "The running kernel does not expose a writable amd_pstate epp_boost parameter."
   fi
+
   if [[ -f "$EPP_SERVICE" ]]; then
     systemctl disable linux-saturnus-epp-boost.service >/dev/null 2>&1 || true
     rm -f "$EPP_SERVICE"
     systemctl daemon-reload
   fi
-  echo "AMD P-State EPP boost enabled (default)."
+}
+
+disable_lavd() {
+  if systemctl is-enabled --quiet scx.service; then LAVD_SERVICE_WAS_ENABLED=1; else LAVD_SERVICE_WAS_ENABLED=0; fi
+  if systemctl is-active --quiet scx.service; then LAVD_SERVICE_WAS_ACTIVE=1; else LAVD_SERVICE_WAS_ACTIVE=0; fi
+  if (( LAVD_SERVICE_WAS_ENABLED || LAVD_SERVICE_WAS_ACTIVE )); then
+    LAVD_DISABLE_APPLIED=1
+    systemctl disable --now scx.service || die "Could not disable/stop the LAVD scx.service."
+  fi
+  echo "LAVD disabled: scx.service stopped now and disabled for future boots. The scx-scheds package and its configuration are retained."
 }
 
 persist_lavd_backup() {
@@ -472,8 +566,8 @@ main() {
   make_writable
   configure_epp_boost
   if (( INSTALL_KERNEL )); then install_kernel; else echo "Skipping kernel and initramfs replacement."; fi
-  install_lavd
-  persist_lavd_backup
+  if (( LAVD_ENABLED )); then install_lavd; else disable_lavd; fi
+  if (( LAVD_ENABLED )); then persist_lavd_backup; fi
   BOOT_BACKED=0; MODULES_ADDED=0
   rm -rf -- "$WORK"; WORK=""
   restore_root
