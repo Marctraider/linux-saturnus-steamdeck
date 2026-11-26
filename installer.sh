@@ -12,6 +12,7 @@ POSTBOOT="/usr/local/sbin/linux-saturnus-postboot"
 UNIT="/etc/systemd/system/linux-saturnus-postboot.service"
 WORK="" ROLLBACK="" TOKEN="" RELEASE="" RUN="" OLD_RELEASE=""
 INSTALL_KERNEL=1
+INSTALL_LAVD_USERSPACE=1
 EPP_BOOST=1
 LAVD_ENABLED=1
 LAVD_MODE="--autopilot"
@@ -212,7 +213,14 @@ prompt_options() {
     saturnus_installed=1
   fi
 
-  if prompt_yes_no "Install the fetched kernel in place, replacing the current boot files?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
+  if prompt_yes_no "Install the fetched kernel in place and install/configure LAVD userspace?" "Y"; then
+    INSTALL_KERNEL=1
+    INSTALL_LAVD_USERSPACE=1
+  else
+    INSTALL_KERNEL=0
+    INSTALL_LAVD_USERSPACE=0
+    echo "Skipping fetched-kernel and LAVD userspace installation."
+  fi
 
   if (( saturnus_installed )); then
     echo "Existing Saturnus kernel installation detected."
@@ -230,14 +238,16 @@ parse_args() {
         cat <<'HELP'
 Usage: sudo env GH_TOKEN="$(gh auth token)" bash installer.sh
 
-The installer independently asks whether to install the fetched kernel in
-place, whether to enable AMD P-State EPP boost, and whether to enable LAVD in
-Autopilot mode. Declining kernel replacement does not skip the EPP or LAVD
-choices. LAVD userspace is installed/configured regardless of whether its
-scheduler service is enabled. EPP boost is applied at runtime and added to the
-GRUB kernel command line for persistence. LAVD takes effect immediately when
-the running kernel supports sched_ext, otherwise after booting a compatible
-kernel. The installer never reboots automatically.
+The installer asks whether to install the fetched kernel in place and install/
+configure LAVD userspace, then always asks whether to enable AMD P-State EPP
+boost and whether to enable LAVD Autopilot. Declining the first prompt skips
+both kernel replacement and LAVD userspace installation, but does not skip
+either configuration choice. If LAVD userspace is not installed, enabling its
+service is only possible when an existing scx.service is already available.
+EPP boost is applied at runtime and added to the GRUB kernel command line for
+persistence. LAVD takes effect immediately when the running kernel supports
+sched_ext, otherwise after booting a compatible kernel. The installer never
+reboots automatically.
 HELP
         exit 0
         ;;
@@ -578,9 +588,20 @@ main() {
   make_writable
   configure_epp_boost
   if (( INSTALL_KERNEL )); then install_kernel; else echo "Skipping kernel and initramfs replacement."; fi
-  install_lavd
-  persist_lavd_backup
-  if (( ! LAVD_ENABLED )); then disable_lavd; fi
+  if (( INSTALL_LAVD_USERSPACE )); then
+    install_lavd
+    persist_lavd_backup
+  fi
+  if (( LAVD_ENABLED )); then
+    if (( ! INSTALL_LAVD_USERSPACE )) && ! systemctl cat scx.service >/dev/null 2>&1; then
+      echo "LAVD was requested, but userspace installation was skipped and no existing scx.service is installed; cannot enable it."
+    else
+      systemctl enable --now scx.service || die "Could not enable/start the LAVD scx.service."
+      echo "LAVD scheduler enabled."
+    fi
+  else
+    disable_lavd
+  fi
   BOOT_BACKED=0; MODULES_ADDED=0
   rm -rf -- "$WORK"; WORK=""
   restore_root
