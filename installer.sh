@@ -207,8 +207,15 @@ prompt_yes_no() {
 
 
 prompt_options() {
-  if prompt_yes_no "Install the fetched kernel in place, replacing the current boot files?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
-  if (( ! INSTALL_KERNEL )); then echo "Skipping kernel replacement; continuing with the other choices."; fi
+  local running_kernel
+  running_kernel="$(uname -r 2>/dev/null || true)"
+  if [[ "$running_kernel" == "$EXPECTED_PREFIX"* ]]; then
+    INSTALL_KERNEL=0
+    echo "Saturnus kernel detected ($running_kernel); skipping kernel installation prompt."
+  else
+    if prompt_yes_no "Install the fetched kernel in place, replacing the current boot files?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
+    if (( ! INSTALL_KERNEL )); then echo "Skipping kernel replacement; continuing with the other choices."; fi
+  fi
   if prompt_yes_no "Enable AMD P-State EPP boost?" "Y"; then EPP_BOOST=1; else EPP_BOOST=0; fi
   if prompt_yes_no "Enable LAVD scheduler (Autopilot mode)?" "Y"; then LAVD_ENABLED=1; else LAVD_ENABLED=0; fi
 }
