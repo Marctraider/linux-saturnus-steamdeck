@@ -7,13 +7,17 @@ KREL="$(uname -r 2>/dev/null || printf unknown)"
 CONFIG_FILE="/boot/config-$KREL"
 PASS=0 WARN=0 FAIL=0 INFO=0
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
-  GREEN= && command -v zcat >/dev/null 2>&1; then CONFIG_SOURCE="/proc/config.gz"
+  GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; CYAN=$'\033[36m'; RESET=$'\033[0m'
+else
+  GREEN=""; YELLOW=""; RED=""; CYAN=""; RESET=""
+fi
+if [[ -r /proc/config.gz ]] && command -v zcat >/dev/null 2>&1; then CONFIG_SOURCE="/proc/config.gz"
 elif [[ -r "$CONFIG_FILE" ]]; then CONFIG_SOURCE="$CONFIG_FILE"
 else CONFIG_SOURCE=""; fi
-pass() { printf '[ OK ] %s\n' "$*"; PASS=$((PASS + 1)); }
-warn() { printf '[WARN] %s\n' "$*"; WARN=$((WARN + 1)); }
-fail() { printf '[FAIL] %s\n' "$*"; FAIL=$((FAIL + 1)); }
-info() { printf '[INFO] %s\n' "$*"; INFO=$((INFO + 1)); }
+pass() { printf '%s[ OK ]%s %s\n' "$GREEN" "$RESET" "$*"; PASS=$((PASS + 1)); }
+warn() { printf '%s[WARN]%s %s\n' "$YELLOW" "$RESET" "$*"; WARN=$((WARN + 1)); }
+fail() { printf '%s[FAIL]%s %s\n' "$RED" "$RESET" "$*"; FAIL=$((FAIL + 1)); }
+info() { printf '%s[INFO]%s %s\n' "$CYAN" "$RESET" "$*"; INFO=$((INFO + 1)); }
 section() { printf '\n== %s ==\n' "$*"; }
 read_config() {
   local key="$1" line
@@ -812,6 +816,6 @@ info "Module debug symbols were stripped during modules_install in the published
 
 section "Summary"
 printf 'Checks: %d OK, %d warnings, %d failures, %d informational\n' "$PASS" "$WARN" "$FAIL" "$INFO"
-if (( FAIL > 0 )); then printf 'Result: one or more expected Saturnus settings/runtime facilities did not match.\n'; exit 1
-elif (( WARN > 0 )); then printf 'Result: review warnings; some runtime interfaces may be unavailable or optional.\n'
-else printf 'Result: all directly testable Saturnus checks passed.\n'; fi
+if (( FAIL > 0 )); then printf '%sResult: one or more expected Saturnus settings/runtime facilities did not match.%s\n' "$RED" "$RESET"; exit 1
+elif (( WARN > 0 )); then printf '%sResult: review warnings; some runtime interfaces may be unavailable or optional.%s\n' "$YELLOW" "$RESET"
+else printf '%sResult: all directly testable Saturnus checks passed.%s\n' "$GREEN" "$RESET"; fi
