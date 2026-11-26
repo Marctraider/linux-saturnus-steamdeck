@@ -208,11 +208,6 @@ prompt_yes_no() {
 
 
 prompt_options() {
-  local saturnus_installed=0
-  if compgen -G "/usr/lib/modules/${EXPECTED_PREFIX}*" >/dev/null; then
-    saturnus_installed=1
-  fi
-
   if prompt_yes_no "Install the fetched kernel in place and install/configure LAVD userspace?" "Y"; then
     INSTALL_KERNEL=1
     INSTALL_LAVD_USERSPACE=1
@@ -222,11 +217,6 @@ prompt_options() {
     echo "Skipping fetched-kernel and LAVD userspace installation."
   fi
 
-  if (( saturnus_installed )); then
-    echo "Existing Saturnus kernel installation detected."
-  else
-    echo "No existing Saturnus kernel installation detected."
-  fi
   if prompt_yes_no "Enable AMD P-State EPP boost?" "Y"; then EPP_BOOST=1; else EPP_BOOST=0; fi
   if prompt_yes_no "Enable LAVD scheduler (Autopilot mode)?" "Y"; then LAVD_ENABLED=1; else LAVD_ENABLED=0; fi
 }
