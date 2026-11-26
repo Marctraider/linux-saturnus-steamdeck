@@ -238,9 +238,6 @@ HELP
 }
 
 install_lavd() {
-  if (( ! INSTALL_KERNEL )) && [[ ! -d /sys/kernel/sched_ext ]]; then
-    die "The running kernel does not expose sched_ext; install the Saturnus kernel or decline LAVD userspace."
-  fi
   need pacman
   need systemctl
 
