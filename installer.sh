@@ -64,6 +64,7 @@ rollback() {
         rm -f /etc/default/scx
       fi
     fi
+    if (( LAVD_CONFIG_CHANGED && LAVD_SERVICE_WAS_ACTIVE )); then systemctl restart scx.service >/dev/null 2>&1 || true; fi
     if (( LAVD_PACKAGE_ADDED )); then pacman -Rns --noconfirm scx-scheds >/dev/null 2>&1 || true; fi
     [[ -z "$LAVD_BACKUP_PATH" ]] || rm -f "$LAVD_BACKUP_PATH"
     rm -f "$STATE/pending-release" "$STATE/previous-release" "$STATE/rollback-dir" "$POSTBOOT" "$UNIT"
