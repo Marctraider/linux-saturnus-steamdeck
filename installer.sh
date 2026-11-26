@@ -207,10 +207,12 @@ prompt_yes_no() {
 
 
 prompt_options() {
-  if prompt_yes_no "Install the kernel and replace the current boot files?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
-  if (( ! INSTALL_KERNEL )); then echo "Kernel replacement: No."; fi
+  if prompt_yes_no "Install the fetched kernel in place and install/configure LAVD userspace?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
+  if (( ! INSTALL_KERNEL )); then echo "Kernel and LAVD userspace installation: No."; fi
   if prompt_yes_no "Enable AMD P-State EPP boost?" "Y"; then EPP_BOOST=1; else EPP_BOOST=0; fi
-  if prompt_yes_no "Enable LAVD scheduler (Autopilot mode)?" "Y"; then LAVD_ENABLED=1; else LAVD_ENABLED=0; fi
+  if (( INSTALL_KERNEL )); then
+    if prompt_yes_no "Enable LAVD scheduler (Autopilot mode)?" "Y"; then LAVD_ENABLED=1; else LAVD_ENABLED=0; fi
+  fi
 }
 
 parse_args() {
@@ -220,12 +222,13 @@ parse_args() {
         cat <<'HELP'
 Usage: sudo env GH_TOKEN="$(gh auth token)" bash installer.sh
 
-The installer asks whether to replace the kernel, enable AMD P-State EPP boost,
-and enable the LAVD scheduler in Autopilot mode. EPP boost is applied at runtime
-and added to the GRUB kernel command line for persistence. LAVD is enabled or
-disabled through its systemd service; it takes effect immediately when the
-running kernel supports sched_ext, otherwise after booting the new kernel.
-The installer never reboots automatically.
+The installer asks whether to install the fetched kernel in place and install/
+configure LAVD userspace, and whether to enable AMD P-State EPP boost. When
+installation is selected, it also asks whether to enable LAVD in Autopilot mode.
+EPP boost is applied at runtime and added to the GRUB kernel command line for
+persistence. LAVD is enabled or disabled through its systemd service; it takes
+effect immediately when the running kernel supports sched_ext, otherwise after
+booting the new kernel. The installer never reboots automatically.
 HELP
         exit 0
         ;;
@@ -569,9 +572,13 @@ main() {
   make_writable
   configure_epp_boost
   if (( INSTALL_KERNEL )); then install_kernel; else echo "Skipping kernel and initramfs replacement."; fi
-  install_lavd
-  persist_lavd_backup
-  if (( ! LAVD_ENABLED )); then disable_lavd; fi
+  if (( INSTALL_KERNEL )); then
+    install_lavd
+    persist_lavd_backup
+    if (( ! LAVD_ENABLED )); then disable_lavd; fi
+  else
+    echo "Skipping LAVD userspace installation and scheduler configuration."
+  fi
   BOOT_BACKED=0; MODULES_ADDED=0
   rm -rf -- "$WORK"; WORK=""
   restore_root
