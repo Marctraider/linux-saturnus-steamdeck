@@ -549,7 +549,7 @@ install_kernel() {
   printf '%s\n' "$ROLLBACK" > "$STATE/rollback-dir"
   install_postboot
   echo "Installed replacement at $BOOT_KERNEL and $BOOT_INITRAMFS."
-  echo "Existing SteamOS GRUB/EFI configuration was not modified."
+  echo "SteamOS GRUB kernel options were updated only for the selected AMD P-State EPP boost setting."
   echo "Previous kernel package/module tree is retained for recovery and package-manager consistency."
   echo "Reboot manually when ready; no reboot is performed."
 }
