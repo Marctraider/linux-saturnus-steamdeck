@@ -215,12 +215,12 @@ prompt_options() {
   if prompt_yes_no "Install the fetched kernel in place, replacing the current boot files?" "Y"; then INSTALL_KERNEL=1; else INSTALL_KERNEL=0; fi
 
   if (( saturnus_installed )); then
-    echo "Existing Saturnus kernel installation detected; showing runtime configuration options."
-    if prompt_yes_no "Enable AMD P-State EPP boost?" "Y"; then EPP_BOOST=1; else EPP_BOOST=0; fi
-    if prompt_yes_no "Enable LAVD scheduler (Autopilot mode)?" "Y"; then LAVD_ENABLED=1; else LAVD_ENABLED=0; fi
+    echo "Existing Saturnus kernel installation detected."
   else
-    echo "No installed Saturnus kernel detected; skipping EPP boost and LAVD configuration prompts."
+    echo "No existing Saturnus kernel installation detected."
   fi
+  if prompt_yes_no "Enable AMD P-State EPP boost?" "Y"; then EPP_BOOST=1; else EPP_BOOST=0; fi
+  if prompt_yes_no "Enable LAVD scheduler (Autopilot mode)?" "Y"; then LAVD_ENABLED=1; else LAVD_ENABLED=0; fi
 }
 
 parse_args() {
