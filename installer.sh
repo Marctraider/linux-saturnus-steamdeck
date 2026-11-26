@@ -381,22 +381,15 @@ for line in lines:
     args = [a for a in args if not a.startswith(param)]
     if key.rstrip().endswith("GRUB_CMDLINE_LINUX_DEFAULT"):
         seen_default = True
-        if value == "1":
-            args.append(param + "1")
+        args.append(param + value)
     out.append(key + shlex.quote(" ".join(args)))
-if not seen_default and value == "1":
-    out.append("GRUB_CMDLINE_LINUX_DEFAULT=" + shlex.quote(param + "1"))
+if not seen_default:
+    out.append("GRUB_CMDLINE_LINUX_DEFAULT=" + shlex.quote(param + value))
 path.write_text("\n".join(out).rstrip() + "\n")
 PY
   need update-grub
   update-grub || die "Could not regenerate SteamOS GRUB configuration."
-  if (( EPP_BOOST )); then
-    grep -Fq "amd_pstate.epp_boost=1" /efi/EFI/steamos/grub.cfg || die "EPP boost kernel parameter is missing from regenerated GRUB configuration."
-  else
-    if grep -Fq "amd_pstate.epp_boost=" /efi/EFI/steamos/grub.cfg; then
-      die "EPP boost kernel parameter remains in regenerated GRUB configuration after disabling."
-    fi
-  fi
+  grep -Fq "amd_pstate.epp_boost=$value" /efi/EFI/steamos/grub.cfg || die "EPP boost kernel parameter amd_pstate.epp_boost=$value is missing from regenerated GRUB configuration."
 
   if [[ -w "$param" ]]; then
     printf '%s\n' "$value" > "$param" || die "Could not set AMD P-State EPP boost at runtime."
@@ -406,7 +399,7 @@ PY
     if (( EPP_BOOST )); then
       echo "AMD P-State EPP boost enabled: runtime value set; amd_pstate.epp_boost=1 added to GRUB for persistence on boot."
     else
-      echo "AMD P-State EPP boost disabled: runtime value set to 0; amd_pstate.epp_boost removed from GRUB boot options."
+      echo "AMD P-State EPP boost disabled: runtime value set to 0; amd_pstate.epp_boost=0 added to GRUB for persistence on boot."
     fi
   elif (( INSTALL_KERNEL )); then
     echo "AMD P-State EPP boost selection saved to GRUB; the running kernel has no writable parameter, so the runtime change will take effect after reboot."
