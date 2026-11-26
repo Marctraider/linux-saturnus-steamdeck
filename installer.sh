@@ -569,8 +569,9 @@ main() {
   make_writable
   configure_epp_boost
   if (( INSTALL_KERNEL )); then install_kernel; else echo "Skipping kernel and initramfs replacement."; fi
-  if (( LAVD_ENABLED )); then install_lavd; else disable_lavd; fi
-  if (( LAVD_ENABLED )); then persist_lavd_backup; fi
+  install_lavd
+  persist_lavd_backup
+  if (( ! LAVD_ENABLED )); then disable_lavd; fi
   BOOT_BACKED=0; MODULES_ADDED=0
   rm -rf -- "$WORK"; WORK=""
   restore_root
