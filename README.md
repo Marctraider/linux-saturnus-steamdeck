@@ -7,7 +7,7 @@ Compiler-optimized Steam Deck kernel based on Valve's SteamOS kernel and configu
 The installer first asks whether to install the fetched kernel **in place** (replacing the existing SteamOS kernel boot files) and install/configure the LAVD userspace components. It then asks whether to enable AMD P-State EPP boost. If installation is selected, it also asks whether to run the LAVD scheduler in **Autopilot** mode. All questions default to yes.
 
 - **AMD P-State EPP boost — Yes:** writes `1` to `/sys/module/amd_pstate/parameters/epp_boost` at runtime and adds `amd_pstate.epp_boost=1` to the SteamOS GRUB kernel command line for persistence across boots.
-- **AMD P-State EPP boost — No:** writes `0` at runtime and removes the parameter from the GRUB command line.
+- **AMD P-State EPP boost — No:** writes `0` at runtime and adds `amd_pstate.epp_boost=0` to the SteamOS GRUB kernel command line, explicitly overriding the kernel default across boots.
 - **LAVD — Yes:** installs/configures `scx-scheds`, enables `scx.service`, and starts or restarts it immediately when the running kernel supports `sched_ext`. If the running kernel lacks `sched_ext` (for example, before rebooting into a newly installed Saturnus kernel), the service is enabled for the next boot instead.
 - **LAVD — No:** the LAVD userspace package and Autopilot configuration are still installed, but `scx.service` is stopped and disabled so the scheduler remains off now and on future boots.
 - **Installation — No:** skips both the fetched-kernel replacement and LAVD userspace installation/configuration.
