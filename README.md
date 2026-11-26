@@ -20,15 +20,15 @@ Run this from the directory where you want both scripts downloaded. The command 
 
 ```bash
 curl -fL https://raw.githubusercontent.com/Marctraider/linux-saturnus-steamdeck/main/installer.sh -o installer.sh && \
-curl -fL https://raw.githubusercontent.com/Marctraider/linux-saturnus-steamdeck/main/Saturnus-status.sh -o Saturnus-status.sh && \
-chmod +x installer.sh Saturnus-status.sh && \
+curl -fL https://raw.githubusercontent.com/Marctraider/linux-saturnus-steamdeck/main/status.sh -o status.sh && \
+chmod +x installer.sh status.sh && \
 sudo bash installer.sh
 ```
 
 After installing the kernel and rebooting into it, run the status checker from that same directory:
 
 ```bash
-./Saturnus-status.sh
+./status.sh
 ```
 
 The status checker is read-only. It reports the running kernel and relevant configuration/runtime details; it does not change system settings or reboot the Deck. The installer does not reboot automatically.
